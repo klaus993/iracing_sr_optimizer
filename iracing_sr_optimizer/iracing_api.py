@@ -1,4 +1,4 @@
-"""iRacing Data API client with OAuth password_limited + cookie auth fallback."""
+"""iRacing Data API client using OAuth password_limited grant."""
 
 from __future__ import annotations
 
@@ -30,14 +30,17 @@ class IRacingAPIError(Exception):
     pass
 
 
-def _get_oauth_token() -> Optional[str]:
+def _get_oauth_token() -> str:
     """Get access token via OAuth password_limited grant.
 
-    Returns None if client credentials are not configured.
-    Raises IRacingAPIError on auth failure.
+    Raises IRacingAPIError if credentials are missing or auth fails.
     """
     if not IRACING_CLIENT_ID or not IRACING_CLIENT_SECRET:
-        return None
+        raise IRacingAPIError(
+            "Missing OAuth credentials. Set IRACING_CLIENT_ID and IRACING_CLIENT_SECRET.\n"
+            "Register at https://oauth.iracing.com/oauth2/book/client_registration.html\n"
+            "Legacy cookie-based auth was retired by iRacing on Dec 9, 2025."
+        )
 
     if not IRACING_EMAIL or not IRACING_PASSWORD:
         raise IRacingAPIError(
@@ -101,38 +104,13 @@ def _get_oauth_token() -> Optional[str]:
 
 
 def get_client() -> irDataClient:
-    """Create an authenticated iRacing API client.
-
-    Tries OAuth password_limited grant first (works with 2FA).
-    Falls back to cookie-based auth if no OAuth client credentials are set.
-    """
-    if not IRACING_EMAIL or not IRACING_PASSWORD:
-        raise IRacingAPIError(
-            "Missing iRacing credentials. Set IRACING_EMAIL and IRACING_PASSWORD "
-            "environment variables."
-        )
-
-    # Try OAuth first (bypasses 2FA)
+    """Create an authenticated iRacing API client via OAuth password_limited grant."""
     token = _get_oauth_token()
-    if token:
-        try:
-            logger.info("Authenticating via OAuth password_limited grant")
-            return irDataClient(access_token=token)
-        except Exception as e:
-            raise IRacingAPIError(f"Failed to create client with OAuth token: {e}")
-
-    # Fall back to cookie auth (won't work with 2FA)
-    if IRACING_CLIENT_ID or IRACING_CLIENT_SECRET:
-        logger.warning(
-            "OAuth credentials partially set — need both IRACING_CLIENT_ID "
-            "and IRACING_CLIENT_SECRET"
-        )
-
     try:
-        logger.info("Authenticating via cookie-based login (no 2FA support)")
-        return irDataClient(username=IRACING_EMAIL, password=IRACING_PASSWORD)
+        logger.info("Authenticating via OAuth password_limited grant")
+        return irDataClient(access_token=token)
     except Exception as e:
-        raise IRacingAPIError(f"Failed to authenticate with iRacing: {e}")
+        raise IRacingAPIError(f"Failed to create client with OAuth token: {e}")
 
 
 def fetch_tracks(use_cache: bool = True) -> Optional[dict[str, int]]:

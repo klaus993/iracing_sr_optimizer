@@ -5,30 +5,19 @@ Ranks iRacing series by Safety Rating (SR) farming potential. Calculates corners
 ## Setup
 
 ```bash
-# Create virtual environment and install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
-pip install iracingdataapi pydantic
-
-# For running tests
-pip install pytest
+pip install -r requirements.txt
 ```
 
 ## Configuration
 
-### Basic auth (no 2FA)
+iRacing requires OAuth for all API access. The legacy cookie-based `/auth` endpoint was [retired on Dec 9, 2025](https://support.iracing.com/support/solutions/articles/31000177717-2026-season-1-initial-release-notes-2025-12-08-03-) with the 2026 Season 1 release. Username/password login no longer works for any account, regardless of 2FA status. See [iRacing's legacy auth notice](https://support.iracing.com/support/solutions/articles/31000173894-enabling-or-disabling-legacy-read-only-authentication) for details.
 
-```bash
-export IRACING_EMAIL="your@email.com"
-export IRACING_PASSWORD="your_password"
-```
+This tool uses the [`password_limited` OAuth grant](https://oauth.iracing.com/oauth2/book/password_limited_flow.html), which is designed for headless/script use.
 
-### OAuth auth (required if 2FA is enabled)
-
-If your iRacing account has two-factor authentication enabled, you need OAuth client credentials. The `password_limited` grant bypasses 2FA by design.
-
-1. Register at [oauth.iracing.com](https://oauth.iracing.com/oauth2/book/client_registration.html) (contact iRacing from your account email, takes up to 10 days)
-2. Set all four env vars:
+1. Register for OAuth client credentials at [oauth.iracing.com](https://oauth.iracing.com/oauth2/book/client_registration.html) — email iRacing from your account email, takes up to 10 days
+2. Set these env vars:
 
 ```bash
 export IRACING_EMAIL="your@email.com"
@@ -36,8 +25,6 @@ export IRACING_PASSWORD="your_password"
 export IRACING_CLIENT_ID="your_client_id"
 export IRACING_CLIENT_SECRET="your_client_secret"
 ```
-
-When `IRACING_CLIENT_ID` and `IRACING_CLIENT_SECRET` are set, the tool uses OAuth automatically. Otherwise it falls back to cookie-based auth (no 2FA support).
 
 ## Usage
 
@@ -134,7 +121,7 @@ iracing_sr_optimizer/
   __main__.py          # python -m entry point
   main.py              # CLI argument parsing and orchestration
   config.py            # Paths, credentials, constants
-  iracing_api.py       # iRacing API client (OAuth + cookie auth)
+  iracing_api.py       # iRacing API client (OAuth password_limited)
   fetch_schedule.py    # Fetches seasons/schedules/tracks -> schedule_data.json
   models.py            # Series, WeekSchedule, SRPotential dataclasses
   sr_calculator.py     # SR scoring engine

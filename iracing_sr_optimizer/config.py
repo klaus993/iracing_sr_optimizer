@@ -11,7 +11,7 @@ CACHE_DIR = Path.home() / ".iracing_sr_cache"
 IRACING_EMAIL = os.environ.get("IRACING_EMAIL", "")
 IRACING_PASSWORD = os.environ.get("IRACING_PASSWORD", "")
 
-# OAuth client credentials (optional — needed for 2FA accounts)
+# OAuth client credentials (required — legacy auth was retired Dec 2025)
 # Register at https://oauth.iracing.com/oauth2/book/client_registration.html
 IRACING_CLIENT_ID = os.environ.get("IRACING_CLIENT_ID", "")
 IRACING_CLIENT_SECRET = os.environ.get("IRACING_CLIENT_SECRET", "")
