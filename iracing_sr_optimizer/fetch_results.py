@@ -9,7 +9,7 @@ import time
 from typing import Optional
 
 from .config import RESULTS_CACHE_DIR
-from .iracing_api import _to_dict
+from .iracing_api import _to_dict, refresh_client, IRacingAPIError
 from .models import Series, SeriesEmpirical
 
 logger = logging.getLogger(__name__)
@@ -121,8 +121,18 @@ def fetch_results_for_series(
         try:
             subsession_data = client.result(subsession_id)
         except Exception as e:
-            logger.warning(f"Failed to fetch subsession {subsession_id}: {e}")
-            continue
+            if _should_refresh_for_error(e):
+                try:
+                    client = refresh_client()
+                    subsession_data = client.result(subsession_id)
+                except (Exception, IRacingAPIError) as retry_err:
+                    logger.warning(
+                        f"Failed to fetch subsession {subsession_id} after token refresh: {retry_err}"
+                    )
+                    continue
+            else:
+                logger.warning(f"Failed to fetch subsession {subsession_id}: {e}")
+                continue
 
         sub_dict = _to_dict(subsession_data) if not isinstance(subsession_data, dict) else subsession_data
         corners_per_lap = sub_dict.get("corners_per_lap", 0)
@@ -174,6 +184,14 @@ def fetch_results_for_series(
     })
 
     return empirical
+
+
+def _should_refresh_for_error(err: Exception) -> bool:
+    """Return True if the error likely indicates an expired/invalid token."""
+    if isinstance(err, json.JSONDecodeError):
+        return True
+    msg = str(err).lower()
+    return "access token not valid" in msg
 
 
 def fetch_results(

@@ -45,7 +45,7 @@ def _mask_secret(secret: str, identifier: str) -> str:
     ).decode("utf-8")
 
 
-def _get_oauth_token() -> str:
+def _get_oauth_token(force_refresh: bool = False) -> str:
     """Get access token via OAuth password_limited grant.
 
     Raises IRacingAPIError if credentials are missing or auth fails.
@@ -63,7 +63,7 @@ def _get_oauth_token() -> str:
         )
 
     # Check cached token
-    if TOKEN_CACHE_FILE.exists():
+    if not force_refresh and TOKEN_CACHE_FILE.exists():
         try:
             with open(TOKEN_CACHE_FILE) as f:
                 cached = json.load(f)
@@ -124,6 +124,16 @@ def get_client() -> irDataClient:
         return irDataClient(access_token=token)
     except Exception as e:
         raise IRacingAPIError(f"Failed to create client with OAuth token: {e}")
+
+
+def refresh_client() -> irDataClient:
+    """Create a client with a freshly fetched OAuth token (bypass cache)."""
+    token = _get_oauth_token(force_refresh=True)
+    try:
+        logger.info("Refreshing OAuth token and creating new client")
+        return irDataClient(access_token=token)
+    except Exception as e:
+        raise IRacingAPIError(f"Failed to create client with refreshed OAuth token: {e}")
 
 
 def fetch_tracks(use_cache: bool = True) -> Optional[dict[str, int]]:
