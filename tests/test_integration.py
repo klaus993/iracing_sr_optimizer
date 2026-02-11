@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from iracing_sr_optimizer import config
-from iracing_sr_optimizer.models import Series, load_schedule
+from iracing_sr_optimizer.models import Series, SeriesEmpirical, UserSR, load_schedule
+from iracing_sr_optimizer.output_formatter import format_csv, format_json, format_table
 from iracing_sr_optimizer.sr_calculator import calculate_sr_potential, rank_series
 from iracing_sr_optimizer.main import main
 
@@ -33,6 +34,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 101,
+        "season_id": 1001,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Charlotte Motor Speedway - Legends Oval", "track_id": 1, "race_laps": 40, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
             {"week": 2, "start_date": "2025-03-18", "track": "Langley Speedway", "track_id": 2, "race_laps": 35, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
@@ -54,6 +57,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 102,
+        "season_id": 1002,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Daytona International Speedway - Oval", "track_id": 3, "race_laps": None, "race_minutes": 25, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -74,6 +79,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 103,
+        "season_id": 1003,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Summit Point Raceway", "track_id": 10, "race_laps": 15, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -94,6 +101,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 104,
+        "season_id": 1004,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Watkins Glen International - Boot", "track_id": 11, "race_laps": 12, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -114,6 +123,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 105,
+        "season_id": 1005,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Summit Point Raceway", "track_id": 10, "race_laps": 12, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -134,6 +145,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 106,
+        "season_id": 1006,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Lime Rock Park", "track_id": 12, "race_laps": 18, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -154,6 +167,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 107,
+        "season_id": 1007,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Knoxville Raceway", "track_id": 20, "race_laps": None, "race_minutes": None, "heat_laps": 8, "consolation_laps": 6, "feature_laps": 20},
         ],
@@ -174,6 +189,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 17,
         "incident_penalty_threshold": None,
+        "series_id": 108,
+        "season_id": 1008,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Daytona Rallycross and Dirt Road - Rallycross Long", "track_id": 30, "race_laps": 6, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -194,6 +211,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": False,
         "incident_dq": 35,
         "incident_penalty_threshold": 15,
+        "series_id": 109,
+        "season_id": 1009,
         "weeks": [],
     },
     # 10. Team racing series
@@ -212,6 +231,8 @@ FIXTURE_DATA = {"series": [
         "is_team_racing": True,
         "incident_dq": None,
         "incident_penalty_threshold": None,
+        "series_id": 110,
+        "season_id": 1010,
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Road America", "track_id": 40, "race_laps": None, "race_minutes": 120, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
@@ -244,6 +265,10 @@ class TestLoadAndRank:
     def test_load_fixture_parses_all_series(self, fixture_series):
         # 10 entries total, but one has no weeks — load_schedule still creates it
         assert len(fixture_series) == 10
+        # Verify series_id and season_id are loaded
+        for s in fixture_series:
+            assert s.series_id is not None
+            assert s.season_id is not None
 
     def test_all_five_categories_represented(self, fixture_series):
         results = rank_series(fixture_series, week_num=1)
@@ -391,3 +416,111 @@ class TestRealDataValidation:
         all_series = load_schedule(SCHEDULE_JSON)
         results = rank_series(all_series, week_num=1, category_filter="FORMULA_CAR")
         assert len(results) > 0, "No FORMULA_CAR series found — data may need re-fetching with the category fix"
+
+
+# ---------------------------------------------------------------------------
+# TestEmpiricalEnrichment — test full pipeline with empirical data
+# ---------------------------------------------------------------------------
+
+class TestEmpiricalEnrichment:
+    @pytest.fixture
+    def empirical_data(self):
+        """Mock empirical data matching some fixture series."""
+        return {
+            "Mazda MX-5 Cup": SeriesEmpirical(
+                series_name="Mazda MX-5 Cup",
+                avg_incidents=3.5,
+                median_incidents=3.0,
+                avg_sr_delta=12.0,
+                avg_cpi=45.0,
+                sample_size=120,
+                subsessions_fetched=8,
+            ),
+            "Formula Vee": SeriesEmpirical(
+                series_name="Formula Vee",
+                avg_incidents=5.0,
+                median_incidents=4.0,
+                avg_sr_delta=-5.0,
+                avg_cpi=30.0,
+                sample_size=80,
+                subsessions_fetched=6,
+            ),
+        }
+
+    @pytest.fixture
+    def user_sr(self):
+        return UserSR(
+            sub_level=345, license_class="C", sr_display=3.45,
+            cpi=40.0, category="SPORTS_CAR",
+        )
+
+    def test_rank_series_with_empirical_data(self, fixture_series, empirical_data):
+        results = rank_series(fixture_series, week_num=1, empirical_data=empirical_data)
+        mazda = [r for r in results if r.series_name == "Mazda MX-5 Cup"]
+        assert len(mazda) == 1
+        assert mazda[0].avg_incidents == pytest.approx(3.5)
+        assert mazda[0].avg_sr_delta == pytest.approx(12.0)
+        assert mazda[0].empirical_sample_size == 120
+
+    def test_rank_series_without_empirical_graceful(self, fixture_series):
+        results = rank_series(fixture_series, week_num=1)
+        for r in results:
+            assert r.avg_incidents is None
+            assert r.avg_sr_delta is None
+            assert r.empirical_sample_size is None
+            assert r.predicted_sr_direction is None
+
+    def test_table_output_includes_empirical_columns(self, fixture_series, empirical_data):
+        results = rank_series(fixture_series, week_num=1, empirical_data=empirical_data)
+        output = format_table(results, week_num=1)
+        assert "AvgInc" in output
+        assert "AvgSR" in output
+
+    def test_json_output_includes_empirical_fields(self, fixture_series, empirical_data):
+        results = rank_series(fixture_series, week_num=1, empirical_data=empirical_data)
+        output = format_json(results)
+        data = json.loads(output)
+        assert any(d["avg_incidents"] is not None for d in data)
+        assert any(d["avg_sr_delta"] is not None for d in data)
+        assert "empirical_sample_size" in data[0]
+        assert "predicted_sr_direction" in data[0]
+
+    def test_csv_output_includes_empirical_header(self, fixture_series, empirical_data):
+        results = rank_series(fixture_series, week_num=1, empirical_data=empirical_data)
+        output = format_csv(results)
+        reader = csv.reader(io.StringIO(output))
+        header = next(reader)
+        assert "avg_incidents" in header
+        assert "avg_sr_delta" in header
+        assert "empirical_sample_size" in header
+        assert "predicted_sr_direction" in header
+
+    def test_personal_prediction_in_output(self, fixture_series, empirical_data, user_sr):
+        results = rank_series(
+            fixture_series, week_num=1,
+            empirical_data=empirical_data, user_sr=user_sr,
+        )
+        output = format_table(results, week_num=1)
+        assert "Pred" in output
+        # At least one result should have a prediction
+        mazda = [r for r in results if r.series_name == "Mazda MX-5 Cup"]
+        assert mazda[0].predicted_sr_direction is not None
+
+
+# ---------------------------------------------------------------------------
+# TestCLIWithSR — CLI tests with --my-sr
+# ---------------------------------------------------------------------------
+
+class TestCLIWithSR:
+    @pytest.fixture(autouse=True)
+    def _patch_schedule_path(self, fixture_path, monkeypatch):
+        monkeypatch.setattr(config, "SCHEDULE_JSON", fixture_path)
+
+    def test_my_sr_flag_accepted(self, capsys):
+        main(["--week", "1", "--no-api", "--my-sr", "C3.45"])
+        output = capsys.readouterr().out
+        assert "iRacing SR Optimizer" in output
+
+    def test_my_sr_invalid_exits_with_error(self):
+        with pytest.raises(SystemExit):
+            main(["--week", "1", "--no-api", "--my-sr", "X9.99"])

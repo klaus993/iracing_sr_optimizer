@@ -50,6 +50,8 @@ class Series:
     incident_dq: Optional[int]
     incident_penalty_threshold: Optional[int]
     weeks: list[WeekSchedule] = field(default_factory=list)
+    series_id: Optional[int] = None
+    season_id: Optional[int] = None
 
     @classmethod
     def from_dict(cls, d: dict) -> Series:
@@ -70,6 +72,8 @@ class Series:
             incident_dq=d.get("incident_dq"),
             incident_penalty_threshold=d.get("incident_penalty_threshold"),
             weeks=weeks,
+            series_id=d.get("series_id"),
+            season_id=d.get("season_id"),
         )
 
     def get_week(self, week_num: int) -> Optional[WeekSchedule]:
@@ -95,6 +99,39 @@ class SRPotential:
     farming_score: float
     is_heat_racing: bool
     heat_detail: str = ""
+    avg_incidents: Optional[float] = None
+    avg_sr_delta: Optional[float] = None
+    empirical_sample_size: Optional[int] = None
+    predicted_sr_direction: Optional[str] = None
+
+
+@dataclass
+class SeriesEmpirical:
+    series_name: str
+    avg_incidents: float
+    median_incidents: float
+    avg_sr_delta: float
+    avg_cpi: float
+    sample_size: int
+    subsessions_fetched: int
+
+
+@dataclass
+class UserSR:
+    sub_level: int
+    license_class: str
+    sr_display: float
+    cpi: float
+    category: str
+
+
+@dataclass
+class SRPrediction:
+    predicted_direction: str
+    session_cpi: float
+    user_cpi: float
+    empirical_avg_delta: float
+    confidence: str
 
 
 def load_schedule(path: Path) -> list[Series]:

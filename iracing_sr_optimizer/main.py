@@ -6,12 +6,13 @@ import argparse
 import logging
 import sys
 
-from .config import CATEGORIES, SCHEDULE_JSON
+from .config import CATEGORIES, IRACING_CUST_ID, RESULTS_CACHE_DIR, SCHEDULE_JSON
 from .fetch_schedule import fetch_and_save_schedule
 from .iracing_api import fetch_tracks
 from .models import load_schedule
 from .output_formatter import format_csv, format_json, format_table
 from .sr_calculator import rank_series
+from .sr_predictor import parse_sr_string
 from .track_data import load_api_track_cache
 
 
@@ -67,6 +68,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip iRacing API, use hardcoded track data only",
     )
     parser.add_argument(
+        "--fetch-results",
+        action="store_true",
+        help="Fetch empirical race results for the target week",
+    )
+    parser.add_argument(
+        "--cust-id",
+        type=int,
+        default=None,
+        help="iRacing customer ID for personal SR prediction (also reads IRACING_CUST_ID env var)",
+    )
+    parser.add_argument(
+        "--my-sr",
+        type=str,
+        default=None,
+        help="Manual SR override, e.g. 'C3.45' (bypasses API SR fetch)",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging",
@@ -87,6 +105,15 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s: %(message)s",
     )
+
+    # Parse --my-sr early so we fail fast on invalid input
+    user_sr = None
+    if args.my_sr:
+        try:
+            user_sr = parse_sr_string(args.my_sr)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Fetch schedule from API if requested
     if args.fetch:
@@ -118,6 +145,41 @@ def main(argv: list[str] | None = None) -> None:
     # Determine weeks to process
     weeks = list(range(1, 13)) if args.all_weeks else [args.week]
 
+    # Fetch empirical results if requested
+    empirical_data = None
+    if args.fetch_results:
+        from .fetch_results import fetch_results
+        from .iracing_api import IRacingAPIError, get_client
+
+        try:
+            client = get_client()
+        except IRacingAPIError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        target_week = weeks[0] if len(weeks) == 1 else (args.week or 1)
+        print(f"Fetching empirical results for week {target_week}...")
+        empirical_data = fetch_results(target_week, all_series, client)
+
+    # Load cached empirical data if not fetching but cache exists
+    if empirical_data is None:
+        empirical_data = _load_cached_empirical(all_series, weeks[0] if len(weeks) == 1 else 1)
+
+    # Fetch user SR from API if --cust-id provided (and --my-sr not set)
+    if user_sr is None:
+        cust_id = args.cust_id or (int(IRACING_CUST_ID) if IRACING_CUST_ID else None)
+        if cust_id and not args.no_api:
+            from .iracing_api import IRacingAPIError, get_client
+            from .sr_predictor import get_user_sr
+
+            try:
+                client = get_client()
+                user_sr = get_user_sr(client, cust_id, args.category or "")
+                if user_sr:
+                    print(f"Your SR: {user_sr.license_class}{user_sr.sr_display:.2f} (CPI: {user_sr.cpi:.1f})")
+            except IRacingAPIError as e:
+                print(f"Warning: Could not fetch user SR: {e}", file=sys.stderr)
+
     for week_num in weeks:
         results = rank_series(
             all_series,
@@ -125,6 +187,8 @@ def main(argv: list[str] | None = None) -> None:
             api_tracks=api_tracks,
             category_filter=args.category,
             license_filter=args.license,
+            empirical_data=empirical_data,
+            user_sr=user_sr,
         )
 
         if args.output_json:
@@ -137,6 +201,28 @@ def main(argv: list[str] | None = None) -> None:
         if args.all_weeks and week_num < 12:
             print("=" * 105)
             print()
+
+
+def _load_cached_empirical(all_series, week_num):
+    """Try to load cached empirical data for all series."""
+    import json
+
+    from .models import SeriesEmpirical
+
+    data = {}
+    for series in all_series:
+        if not series.season_id:
+            continue
+        cache_file = RESULTS_CACHE_DIR / f"{series.season_id}_week{week_num}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file) as f:
+                    cached = json.load(f)
+                data[series.name] = SeriesEmpirical(**cached)
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+
+    return data if data else None
 
 
 if __name__ == "__main__":

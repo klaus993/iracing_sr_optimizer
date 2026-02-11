@@ -6,7 +6,8 @@ import logging
 from typing import Optional
 
 from .config import DIRT_CATEGORIES, LAP_TIME_ESTIMATES
-from .models import Series, SRPotential, WeekSchedule
+from .models import Series, SeriesEmpirical, SRPotential, UserSR, WeekSchedule
+from .sr_predictor import predict_sr_change
 from .track_data import get_corners_for_track
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,8 @@ def rank_series(
     api_tracks: Optional[dict[str, int]] = None,
     category_filter: Optional[str] = None,
     license_filter: Optional[str] = None,
+    empirical_data: Optional[dict[str, SeriesEmpirical]] = None,
+    user_sr: Optional[UserSR] = None,
 ) -> list[SRPotential]:
     """Calculate and rank all series by SR farming potential for a given week."""
     from .config import LICENSE_ORDER
@@ -115,6 +118,22 @@ def rank_series(
 
         potential = calculate_sr_potential(series, week_num, api_tracks)
         if potential:
+            # Enrich with empirical data if available
+            if empirical_data and series.name in empirical_data:
+                emp = empirical_data[series.name]
+                potential.avg_incidents = emp.avg_incidents
+                potential.avg_sr_delta = emp.avg_sr_delta
+                potential.empirical_sample_size = emp.sample_size
+
+                # Personal SR prediction
+                if user_sr:
+                    prediction = predict_sr_change(
+                        user_sr, emp,
+                        potential.corners_per_lap,
+                        potential.effective_laps,
+                    )
+                    potential.predicted_sr_direction = prediction.predicted_direction
+
             results.append(potential)
 
     # Sort by farming score (corners per hour adjusted) descending

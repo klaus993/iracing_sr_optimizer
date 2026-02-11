@@ -293,6 +293,8 @@ def fetch_and_save_schedule() -> int:
             "is_team_racing": is_team,
             "incident_dq": incident_dq,
             "incident_penalty_threshold": incident_penalty,
+            "series_id": series_id,
+            "season_id": sd.get("season_id"),
             "weeks": weeks,
         })
 

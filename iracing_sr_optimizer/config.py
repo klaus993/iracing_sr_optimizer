@@ -15,6 +15,10 @@ IRACING_PASSWORD = os.environ.get("IRACING_PASSWORD", "")
 # Register at https://oauth.iracing.com/oauth2/book/client_registration.html
 IRACING_CLIENT_ID = os.environ.get("IRACING_CLIENT_ID", "")
 IRACING_CLIENT_SECRET = os.environ.get("IRACING_CLIENT_SECRET", "")
+IRACING_CUST_ID = os.environ.get("IRACING_CUST_ID", "")
+
+# Results cache
+RESULTS_CACHE_DIR = DATA_DIR / "results_cache"
 
 # SR calculation defaults
 DEFAULT_OVAL_CORNERS = 4
@@ -35,6 +39,9 @@ CATEGORIES = ["OVAL", "SPORTS_CAR", "FORMULA_CAR", "DIRT_OVAL", "DIRT_ROAD"]
 
 # Dirt categories get 2x SR advantage (heavy contact = 2x instead of 4x)
 DIRT_CATEGORIES = {"DIRT_OVAL", "DIRT_ROAD"}
+
+# SR rolling window estimate (community-approximated)
+SR_ROLLING_WINDOW = 2600
 
 # License class ordering for filtering
 LICENSE_ORDER = {"R": 0, "D": 1, "C": 2, "B": 3, "A": 4}
