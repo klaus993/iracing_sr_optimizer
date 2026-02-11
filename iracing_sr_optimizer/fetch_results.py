@@ -15,6 +15,7 @@ from .models import Series, SeriesEmpirical
 logger = logging.getLogger(__name__)
 
 API_DELAY = 0.5  # seconds between API calls
+PROGRESS_EVERY = 10
 
 
 def _cache_path(season_id: int, week_num: int):
@@ -71,6 +72,7 @@ def fetch_results_for_series(
     series: Series,
     week_num: int,
     client,
+    max_subsessions: Optional[int] = None,
 ) -> Optional[SeriesEmpirical]:
     """Fetch all race results for a series in a given week.
 
@@ -111,10 +113,17 @@ def fetch_results_for_series(
     all_drivers = []
     subsession_count = 0
 
+    subsessions_seen = 0
     for result_entry in results_list:
         subsession_id = result_entry.get("subsession_id")
         if not subsession_id:
             continue
+
+        if max_subsessions is not None and subsessions_seen >= max_subsessions:
+            logger.info(
+                f"Reached max_subsessions={max_subsessions} for {series.name}"
+            )
+            break
 
         time.sleep(API_DELAY)
 
@@ -137,6 +146,10 @@ def fetch_results_for_series(
         sub_dict = _to_dict(subsession_data) if not isinstance(subsession_data, dict) else subsession_data
         corners_per_lap = sub_dict.get("corners_per_lap", 0)
         subsession_count += 1
+        subsessions_seen += 1
+
+        if subsessions_seen % PROGRESS_EVERY == 0:
+            print(f" {subsessions_seen}...", end="", flush=True)
 
         for session_result in sub_dict.get("session_results", []):
             # Only look at race sessions (simsession_type=6 is race)
@@ -198,6 +211,7 @@ def fetch_results(
     week_num: int,
     series_list: list[Series],
     client,
+    max_subsessions: Optional[int] = None,
 ) -> dict[str, SeriesEmpirical]:
     """Fetch empirical race data for all series in the given week.
 
@@ -213,7 +227,12 @@ def fetch_results(
         logger.info(f"[{i}/{total}] Fetching results for {series.name}...")
         print(f"  [{i}/{total}] {series.name}...", end="", flush=True)
 
-        empirical = fetch_results_for_series(series, week_num, client)
+        empirical = fetch_results_for_series(
+            series,
+            week_num,
+            client,
+            max_subsessions=max_subsessions,
+        )
         if empirical:
             results[series.name] = empirical
             print(f" {empirical.sample_size} drivers, {empirical.subsessions_fetched} subsessions")

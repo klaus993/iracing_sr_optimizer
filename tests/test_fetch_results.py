@@ -193,3 +193,31 @@ class TestFetchResultsTokenRefresh:
         empirical = fetch_results_for_series(series, 1, client)
         assert empirical is not None
         assert empirical.sample_size == 1
+
+    def test_max_subsessions_limit(self):
+        series = self._make_series()
+
+        class FakeClient:
+            def result_season_results(self, season_id, event_type=5, race_week_num=0):
+                return {"results_list": [{"subsession_id": 1}, {"subsession_id": 2}]}
+
+            def result(self, subsession_id):
+                return {
+                    "corners_per_lap": 4,
+                    "session_results": [{
+                        "simsession_type": 6,
+                        "results": [{
+                            "incidents": 1,
+                            "laps_complete": 5,
+                            "old_sub_level": 300,
+                            "new_sub_level": 305,
+                            "old_cpi": 0.0,
+                            "new_cpi": 0.0,
+                        }],
+                    }],
+                }
+
+        client = FakeClient()
+        empirical = fetch_results_for_series(series, 1, client, max_subsessions=1)
+        assert empirical is not None
+        assert empirical.sample_size == 1

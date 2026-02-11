@@ -73,6 +73,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Fetch empirical race results for the target week",
     )
     parser.add_argument(
+        "--max-subsessions",
+        type=int,
+        default=None,
+        help="Limit subsessions fetched per series (useful for quick runs)",
+    )
+    parser.add_argument(
         "--cust-id",
         type=int,
         default=None,
@@ -159,7 +165,12 @@ def main(argv: list[str] | None = None) -> None:
 
         target_week = weeks[0] if len(weeks) == 1 else (args.week or 1)
         print(f"Fetching empirical results for week {target_week}...")
-        empirical_data = fetch_results(target_week, all_series, client)
+        empirical_data = fetch_results(
+            target_week,
+            all_series,
+            client,
+            max_subsessions=args.max_subsessions,
+        )
 
     # Load cached empirical data if not fetching but cache exists
     if empirical_data is None:
