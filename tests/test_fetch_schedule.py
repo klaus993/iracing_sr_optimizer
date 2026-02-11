@@ -32,9 +32,16 @@ class TestMapCategory:
         car_types = [{"car_type": "sports_car"}]
         assert _map_category("road", car_types) == "SPORTS_CAR"
 
+    def test_formula_car_direct(self):
+        assert _map_category("formula_car", []) == "FORMULA_CAR"
+
+    def test_sports_car_direct(self):
+        assert _map_category("sports_car", []) == "SPORTS_CAR"
+
     def test_case_insensitive(self):
         assert _map_category("Oval", []) == "OVAL"
         assert _map_category("DIRT_OVAL", []) == "DIRT_OVAL"
+        assert _map_category("Formula_Car", []) == "FORMULA_CAR"
 
     def test_space_to_underscore(self):
         assert _map_category("dirt oval", []) == "DIRT_OVAL"

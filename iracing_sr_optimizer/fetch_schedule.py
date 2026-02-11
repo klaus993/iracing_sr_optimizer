@@ -26,6 +26,8 @@ CATEGORY_MAP = {
     "oval": "OVAL",
     "dirt_oval": "DIRT_OVAL",
     "dirt_road": "DIRT_ROAD",
+    "formula_car": "FORMULA_CAR",
+    "sports_car": "SPORTS_CAR",
 }
 
 
