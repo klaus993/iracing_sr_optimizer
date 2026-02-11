@@ -1,7 +1,5 @@
 # iRacing SR Optimizer
 
-> ⚠️ **This project is still in development and has not been tested against the live iRacing API yet.** I'm waiting on iRacing to approve my `password_limited` OAuth client registration. Until then, the fetch/auth functionality is untested. If you have OAuth credentials and give it a try, I'd love to hear how it goes — feel free to open an issue!
-
 Ranks iRacing series by Safety Rating (SR) farming potential. Calculates corners per hour for each series/week combination to find the fastest way to gain SR.
 
 ## Setup
