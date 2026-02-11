@@ -30,6 +30,21 @@ class IRacingAPIError(Exception):
     pass
 
 
+def _mask_secret(secret: str, identifier: str) -> str:
+    """Mask a secret using iRacing's masking algorithm.
+
+    SHA-256 hash of secret + normalized identifier, then base64 encoded.
+    Used for both password (identifier=username) and client_secret (identifier=client_id).
+    See https://oauth.iracing.com/oauth2/book/token_endpoint.html
+    """
+    import base64
+    normalized_id = identifier.strip().lower()
+    combined = f"{secret}{normalized_id}"
+    return base64.b64encode(
+        hashlib.sha256(combined.encode("utf-8")).digest()
+    ).decode("utf-8")
+
+
 def _get_oauth_token() -> str:
     """Get access token via OAuth password_limited grant.
 
@@ -58,19 +73,17 @@ def _get_oauth_token() -> str:
         except (json.JSONDecodeError, KeyError):
             pass
 
-    # Hash password the way iRacing expects
-    pw_hash = hashlib.sha256(
-        (IRACING_PASSWORD + IRACING_EMAIL.lower()).encode("utf-8")
-    ).digest()
-    import base64
-    encoded_pw = base64.b64encode(pw_hash).decode("utf-8")
+    # Mask password and client_secret per iRacing's masking algorithm
+    masked_pw = _mask_secret(IRACING_PASSWORD, IRACING_EMAIL)
+    masked_secret = _mask_secret(IRACING_CLIENT_SECRET, IRACING_CLIENT_ID)
 
     data = urllib.parse.urlencode({
         "grant_type": "password_limited",
         "username": IRACING_EMAIL,
-        "password": encoded_pw,
+        "password": masked_pw,
         "client_id": IRACING_CLIENT_ID,
-        "client_secret": IRACING_CLIENT_SECRET,
+        "client_secret": masked_secret,
+        "scope": "iracing.auth",
     }).encode()
 
     req = urllib.request.Request(

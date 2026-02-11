@@ -67,7 +67,8 @@ def _map_license_range(license_group_types: list) -> str:
         return ""
     names = []
     for lgt in license_group_types:
-        name = _val(lgt, "license_group_type", "")
+        group_id = _val(lgt, "license_group_type", 0)
+        name = LICENSE_GROUP_MAP.get(group_id, str(group_id))
         if name:
             names.append(name)
     return " --> ".join(names) if names else ""
