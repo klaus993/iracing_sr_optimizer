@@ -101,6 +101,26 @@ Use only hardcoded corner counts (no iRacing API call for track data):
 python -m iracing_sr_optimizer --week 8 --no-api
 ```
 
+## Output
+
+The default output is a terminal table grouped by category (Oval, Sports Car, Formula Car, Dirt Oval, Dirt Road), sorted by farming score within each group. When no category filter is applied, a cross-category top 10 is shown at the end.
+
+Each row shows:
+
+| Column | Description |
+|--------|-------------|
+| Series | Series name (with heat detail if applicable) |
+| Track | Track name for that week |
+| CpL | Corners per lap |
+| Laps | Effective laps per race (heat + feature for heat racing) |
+| Corners | Total corners per race (CpL x Laps) |
+| /hr | Corners per hour (Corners x races per hour) |
+| Score | Farming score — corners/hr adjusted for incident severity (dirt categories get a 2x bonus since heavy contact is 2x instead of 4x) |
+
+Higher score = faster SR gain (assuming clean racing).
+
+`--json` and `--csv` output the same data with additional fields like `license_class`, `races_per_hour`, `incident_dq`, and `is_heat_racing`.
+
 ## Running tests
 
 ```bash
