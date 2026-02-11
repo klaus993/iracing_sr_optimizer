@@ -101,11 +101,16 @@ Fetch actual race results for the current week to see real-world incident rates 
 # Fetch results for week 8 (requires API credentials)
 python -m iracing_sr_optimizer --fetch-results --week 8
 
+# Faster smoke test: limit subsessions per series
+python -m iracing_sr_optimizer --fetch-results --week 8 --max-subsessions 25
+
 # View enriched output (uses cached results if available)
 python -m iracing_sr_optimizer --week 8 --no-api
 ```
 
 Results are cached to `data/results_cache/` so subsequent runs are fast. When empirical data is available, the output includes additional columns:
+
+During long fetches, the CLI prints a progress heartbeat (e.g. `10... 20...`) every 10 subsessions.
 
 | Column | Description |
 |--------|-------------|
