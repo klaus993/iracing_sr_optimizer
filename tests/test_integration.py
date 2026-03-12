@@ -10,7 +10,7 @@ import pytest
 from iracing_sr_optimizer import config
 from iracing_sr_optimizer.models import Series, load_schedule
 from iracing_sr_optimizer.sr_calculator import calculate_sr_potential, rank_series
-from iracing_sr_optimizer.main import main
+from iracing_sr_optimizer.main import main, parse_args
 
 # ---------------------------------------------------------------------------
 # Fixture data — ~10 realistic series covering all categories and edge cases
@@ -36,6 +36,7 @@ FIXTURE_DATA = {"series": [
         "weeks": [
             {"week": 1, "start_date": "2025-03-11", "track": "Charlotte Motor Speedway - Legends Oval", "track_id": 1, "race_laps": 40, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
             {"week": 2, "start_date": "2025-03-18", "track": "Langley Speedway", "track_id": 2, "race_laps": 35, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
+            {"week": 13, "start_date": "2025-06-03", "track": "USA International Speedway", "track_id": 5, "race_laps": 50, "race_minutes": None, "heat_laps": None, "consolation_laps": None, "feature_laps": None},
         ],
     },
     # 2. OVAL — time-based
@@ -301,6 +302,12 @@ class TestLoadAndRank:
         result = calculate_sr_potential(empty, week_num=1)
         assert result is None
 
+    def test_week_13_ranking(self, fixture_series):
+        results = rank_series(fixture_series, week_num=13)
+        assert len(results) > 0
+        names = [r.series_name for r in results]
+        assert "NASCAR Legends Series" in names
+
     def test_team_racing_series_loads(self, fixture_series):
         team = [s for s in fixture_series if s.is_team_racing][0]
         assert team.name == "IMSA Endurance Series"
@@ -347,6 +354,24 @@ class TestCLIIntegration:
         rows = list(reader)
         assert len(rows) > 0
 
+    def test_week_13_accepted(self, capsys):
+        main(["--week", "13", "--no-api"])
+        output = capsys.readouterr().out
+        assert "Week 13" in output
+
+    def test_all_weeks_produces_output_for_each_week(self, capsys):
+        main(["--all-weeks", "--no-api"])
+        output = capsys.readouterr().out
+        for w in range(1, 14):
+            assert f"Week {w}" in output
+
+    def test_all_weeks_separators(self, capsys):
+        main(["--all-weeks", "--no-api"])
+        output = capsys.readouterr().out
+        separator = "=" * 105
+        count = output.count(separator)
+        assert count == 12, f"Expected 12 separators between 13 weeks, got {count}"
+
     def test_category_flag_filters_output(self, capsys):
         main(["--week", "1", "--category", "OVAL", "--no-api"])
         output = capsys.readouterr().out
@@ -354,6 +379,24 @@ class TestCLIIntegration:
         assert "OVAL" in output
         # FORMULA CAR section header should NOT appear
         assert "FORMULA CAR" not in output
+
+
+# ---------------------------------------------------------------------------
+# TestParseArgs — unit tests for CLI argument parsing
+# ---------------------------------------------------------------------------
+
+class TestParseArgs:
+    def test_week_13_valid(self):
+        args = parse_args(["--week", "13"])
+        assert args.week == 13
+
+    def test_week_14_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_args(["--week", "14"])
+
+    def test_week_0_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_args(["--week", "0"])
 
 
 # ---------------------------------------------------------------------------

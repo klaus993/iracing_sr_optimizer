@@ -28,14 +28,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--week",
         type=int,
-        choices=range(1, 13),
+        choices=range(1, 14),
         metavar="N",
-        help="Week number (1-12)",
+        help="Week number (1-13)",
     )
     parser.add_argument(
         "--all-weeks",
         action="store_true",
-        help="Show all 12 weeks",
+        help="Show all 13 weeks",
     )
     parser.add_argument(
         "--category",
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
             api_tracks = load_api_track_cache()
 
     # Determine weeks to process
-    weeks = list(range(1, 13)) if args.all_weeks else [args.week]
+    weeks = list(range(1, 14)) if args.all_weeks else [args.week]
 
     for week_num in weeks:
         results = rank_series(
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print(format_table(results, week_num, args.category))
 
-        if args.all_weeks and week_num < 12:
+        if args.all_weeks and week_num < 13:
             print("=" * 105)
             print()
 
