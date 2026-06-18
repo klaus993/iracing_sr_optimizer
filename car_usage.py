@@ -57,9 +57,54 @@ RACE_EVENT_TYPE = 5
 # 429 backoff, but a small gap keeps us well under iRacing's rate limits.
 THROTTLE_SECONDS = 0.25
 
+# Retry/backoff for rate limiting (HTTP 429) on any API call.
+MAX_RETRIES = 5
+BACKOFF_BASE_SECONDS = 2.0
+
 
 class IRacingAPIError(Exception):
     pass
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    """Best-effort detection of an iRacing rate-limit (HTTP 429) across error types."""
+    status = getattr(exc, "status", None) or getattr(exc, "code", None)
+    if status == 429:
+        return True
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) == 429:
+        return True
+    text = str(exc).lower()
+    return "429" in text or "rate limit" in text or "too many requests" in text
+
+
+def _api_call(label: str, fn, *args, **kwargs):
+    """Call an iRacing API function, logging errors and retrying on rate limits.
+
+    Logs every failure (with the call label), backs off exponentially on HTTP 429,
+    and re-raises as IRacingAPIError once retries are exhausted or for non-retryable
+    errors. `label` is a short human description used in log lines, e.g. "result(123)".
+    """
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if _is_rate_limit(exc) and attempt < MAX_RETRIES:
+                wait = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "Rate limited on %s (attempt %d/%d): %s — backing off %.0fs",
+                    label, attempt, MAX_RETRIES, exc, wait,
+                )
+                time.sleep(wait)
+                continue
+            if _is_rate_limit(exc):
+                logger.error("Rate limited on %s; giving up after %d attempts: %s",
+                             label, attempt, exc)
+            else:
+                logger.error("API error on %s (attempt %d): %s",
+                             label, attempt, exc)
+            logger.debug("Traceback for %s failure", label, exc_info=True)
+            raise IRacingAPIError(f"{label} failed: {exc}") from exc
 
 
 # --- OAuth (copied from iracing_sr_optimizer/iracing_api.py, self-contained) --
@@ -189,36 +234,60 @@ def _to_dict(obj) -> dict:
 
 # --- Series / season / week resolution ---------------------------------------
 
-def find_series_id(client, series_query: str) -> tuple[int, str]:
-    """Find the series whose name contains `series_query` (case-insensitive).
+def resolve_series(
+    client, series_query: Optional[str], series_id: Optional[int]
+) -> tuple[int, str]:
+    """Resolve a (series_id, series_name) pair from an explicit id or a name query.
 
-    Returns (series_id, series_name). Raises IRacingAPIError if no match.
-    Logs all matches so an ambiguous query can be narrowed by the user.
+    If `series_id` is given, it takes precedence (name is looked up for display).
+    Otherwise match by name: a case-insensitive **exact** name match wins over any
+    substring match — this prevents e.g. "IMSA iRacing Series" from being shadowed by
+    "IMSA iRacing Series - Fixed". Raises IRacingAPIError if nothing resolves.
     """
-    q = series_query.lower()
-    all_series = list(client.get_series())
-    logger.debug("Scanning %d series for substring %r", len(all_series), series_query)
-    matches = []
-    for s in all_series:
-        sd = _to_dict(s)
+    all_series = [_to_dict(s) for s in _api_call("get_series()", client.get_series)]
+    logger.debug("Scanning %d series", len(all_series))
+
+    # Explicit id wins.
+    if series_id is not None:
+        for sd in all_series:
+            if sd.get("series_id") == series_id:
+                name = sd.get("series_name", "") or ""
+                logger.info("Resolved series by id -> [%s] %s", series_id, name)
+                return series_id, name
+        raise IRacingAPIError(f"No series found with series_id {series_id}.")
+
+    q = (series_query or "").lower()
+    exact = []
+    substring = []
+    for sd in all_series:
         name = sd.get("series_name", "") or ""
         sid = sd.get("series_id")
-        if sid is not None and q in name.lower():
-            matches.append((sid, name))
+        if sid is None:
+            continue
+        if name.lower() == q:
+            exact.append((sid, name))
+        elif q in name.lower():
+            substring.append((sid, name))
 
-    if not matches:
+    if exact:
+        logger.info("Resolved series by exact name -> [%s] %s", exact[0][0], exact[0][1])
+        return exact[0]
+
+    if not substring:
         raise IRacingAPIError(
-            f"No series matched {series_query!r}. Try a different --series substring."
+            f"No series matched {series_query!r}. Try a different --series substring "
+            f"or pass --series-id."
         )
 
-    if len(matches) > 1:
-        logger.warning("Multiple series matched %r:", series_query)
-        for sid, name in matches:
+    if len(substring) > 1:
+        logger.warning("Multiple series matched %r (no exact match):", series_query)
+        for sid, name in substring:
             logger.warning("  [%s] %s", sid, name)
-        logger.warning("Using the first match. Narrow --series to disambiguate.")
+        logger.warning("Using the first. Pass --series-id N to pick exactly.")
 
-    logger.info("Resolved series %r -> [%s] %s", series_query, matches[0][0], matches[0][1])
-    return matches[0]
+    logger.info("Resolved series %r -> [%s] %s",
+                series_query, substring[0][0], substring[0][1])
+    return substring[0]
 
 
 def resolve_season_and_week(
@@ -234,7 +303,9 @@ def resolve_season_and_week(
     contains today. Any of the three values can be overridden via CLI args.
     race_week_num is 0-indexed (matching the API); CLI --week is 1-indexed.
     """
-    seasons = list(client.series_seasons(include_series=True))
+    seasons = list(_api_call(
+        "series_seasons()", client.series_seasons, include_series=True
+    ))
     logger.debug("Searching %d seasons for active season of series_id %d",
                  len(seasons), series_id)
     season = None
@@ -329,7 +400,9 @@ def find_week_subsessions(
         "Searching results: series_id=%d %ds%s race_week_num=%d event_types=%s",
         series_id, season_year, season_quarter, race_week_num, [event_type],
     )
-    raw = list(client.result_search_series(
+    raw = list(_api_call(
+        "result_search_series()",
+        client.result_search_series,
         season_year=season_year,
         season_quarter=season_quarter,
         series_id=series_id,
@@ -369,7 +442,9 @@ def fetch_result(client, subsession_id: int) -> dict:
             logger.warning("Corrupt cache for %s, refetching.", subsession_id)
 
     logger.debug("Cache miss for subsession %s; fetching from API", subsession_id)
-    result = _to_dict(client.result(subsession_id=subsession_id))
+    result = _to_dict(_api_call(
+        f"result({subsession_id})", client.result, subsession_id=subsession_id
+    ))
     try:
         with open(cache_file, "w") as f:
             json.dump(result, f)
@@ -392,9 +467,10 @@ def count_cars(results: list[dict], car_class_short_name: str) -> Counter:
     counts: Counter = Counter()
     total_rows = 0
     for result in results:
+        class_map = _build_class_map(result)
         for row in _iter_race_rows(result):
             total_rows += 1
-            short = _row_class_short_name(row)
+            short = _row_class_short_name(row, class_map)
             if short is not None and short.strip().lower() == target:
                 car_name = row.get("car_name") or f"car_id:{row.get('car_id')}"
                 counts[car_name] += 1
@@ -409,30 +485,63 @@ def class_short_names(results: list[dict]) -> Counter:
     """Distinct car-class short names seen across results (for --class hints)."""
     seen: Counter = Counter()
     for result in results:
+        class_map = _build_class_map(result)
         for row in _iter_race_rows(result):
-            short = _row_class_short_name(row)
+            short = _row_class_short_name(row, class_map)
             if short:
                 seen[short] += 1
     return seen
 
 
+def _build_class_map(result: dict) -> dict:
+    """Map car_class_id -> short name from a result's top-level `car_classes` array.
+
+    iRacing result rows reliably carry `car_class_id`; the human short name lives in
+    the subsession's top-level `car_classes` list. We prefer `short_name`, falling back
+    to `name`. Empty map if the result has no `car_classes` (then row fields are used).
+    """
+    class_map = {}
+    for cc in result.get("car_classes", []) or []:
+        ccd = _to_dict(cc)
+        cid = ccd.get("car_class_id")
+        short = ccd.get("short_name") or ccd.get("name")
+        if cid is not None and short:
+            class_map[cid] = str(short)
+    return class_map
+
+
 def _iter_race_rows(result: dict):
-    """Yield per-driver result rows from the RACE simsession of one result dict."""
+    """Yield per-driver result rows from the RACE simsession of one result dict.
+
+    The race is identified by simsession name (case-insensitive) rather than a numeric
+    code, since iRacing's simsession_type integers are not the same as event_type codes.
+    Falls back to the last simsession (the race is always last) if no name matches.
+    """
     simsessions = result.get("session_results") or []
-    # Prefer the simsession explicitly typed as a race; else the last (feature) one.
-    race_sessions = [
-        ss for ss in simsessions
-        if (ss.get("simsession_type") == RACE_EVENT_TYPE)
-        or str(ss.get("simsession_type_name", "")).lower() == "race"
-    ]
+    race_sessions = [ss for ss in simsessions if _is_race_simsession(ss)]
     chosen = race_sessions or (simsessions[-1:] if simsessions else [])
     for ss in chosen:
         for row in ss.get("results", []) or []:
             yield row
 
 
-def _row_class_short_name(row: dict) -> Optional[str]:
-    """Best-effort car-class short name for a result row across API field variants."""
+def _is_race_simsession(ss: dict) -> bool:
+    """True if a simsession is the race, by its name fields (not numeric type)."""
+    for key in ("simsession_type_name", "simsession_name"):
+        if str(ss.get(key, "")).strip().lower() == "race":
+            return True
+    return False
+
+
+def _row_class_short_name(row: dict, class_map: dict) -> Optional[str]:
+    """Resolve a result row's car-class short name.
+
+    Prefer the top-level `car_classes` map keyed by the row's `car_class_id`; fall back
+    to short-name fields that may be present directly on the row.
+    """
+    cid = row.get("car_class_id")
+    if cid is not None and cid in class_map:
+        return class_map[cid]
     for key in ("car_class_short_name", "car_class_name"):
         val = row.get(key)
         if val:
@@ -464,7 +573,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                     "(counts race entries across all splits).",
     )
     p.add_argument("--series", default="IMSA",
-                   help="Series name substring to match (default: IMSA)")
+                   help="Series name to match: exact name wins, else substring "
+                        "(default: IMSA). Ignored if --series-id is given.")
+    p.add_argument("--series-id", type=int, default=None,
+                   help="Select a series by exact id (e.g. 447 for IMSA iRacing Series); "
+                        "overrides --series")
     p.add_argument("--class", dest="car_class", default="IMSA23",
                    help="Car class short name to count (default: IMSA23)")
     p.add_argument("--week", type=int, default=None,
@@ -504,7 +617,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         client = get_client()
 
-        series_id, series_name = find_series_id(client, args.series)
+        series_id, series_name = resolve_series(client, args.series, args.series_id)
         season_year, season_quarter, race_week_num = resolve_season_and_week(
             client, series_id, args.week, args.year, args.quarter
         )
