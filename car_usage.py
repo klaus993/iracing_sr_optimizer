@@ -610,6 +610,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+    # Keep our own logs at the chosen level, but silence chatty third-party
+    # libraries so -vv shows car_usage logs instead of every HTTP request.
+    logger.setLevel(level)
+    for noisy in ("urllib3", "iracingdataapi", "requests", "botocore", "boto3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     logger.debug("Args: %s", vars(args))
     logger.debug("Cache dir: %s", CACHE_DIR)
 
