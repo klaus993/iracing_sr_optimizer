@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from car_usage import (  # noqa: E402
+    _track_for_week,
     class_short_names,
     count_cars,
     count_cars_by_class,
@@ -154,6 +155,26 @@ def test_format_all_classes_orders_largest_class_first():
     out = format_all_classes(count_cars_by_class(results), top=None)
     # GT3 has more entries (2) than GTP (1), so its header appears first.
     assert out.index("IMSA23 — 2 entries") < out.index("IMSAP — 1 entries")
+
+
+# --- track for week -----------------------------------------------------------
+
+_SEASON = {"schedules": [
+    {"race_week_num": 0, "track": {"track_name": "Daytona", "config_name": "Road"}},
+    {"race_week_num": 1, "track": {"track_name": "Road Atlanta", "config_name": ""}},
+]}
+
+
+def test_track_for_week_with_config():
+    assert _track_for_week(_SEASON, 0) == "Daytona - Road"
+
+
+def test_track_for_week_without_config():
+    assert _track_for_week(_SEASON, 1) == "Road Atlanta"
+
+
+def test_track_for_week_missing_returns_none():
+    assert _track_for_week(_SEASON, 9) is None
 
 
 # --- series resolution --------------------------------------------------------

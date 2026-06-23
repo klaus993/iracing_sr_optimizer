@@ -216,7 +216,13 @@ def get_client():
     token = _get_oauth_token()
     try:
         logger.info("Authenticating via OAuth password_limited grant")
-        return irDataClient(access_token=token)
+        try:
+            # use_pydantic=True silences the raw-dict deprecation warning; our
+            # _to_dict() already normalizes pydantic models back to plain dicts.
+            return irDataClient(access_token=token, use_pydantic=True)
+        except TypeError:
+            # Older iracingdataapi without the kwarg.
+            return irDataClient(access_token=token)
     except Exception as e:
         raise IRacingAPIError(f"Failed to create client with OAuth token: {e}")
 
@@ -296,12 +302,13 @@ def resolve_season_and_week(
     week_override: Optional[int],
     year_override: Optional[int],
     quarter_override: Optional[int],
-) -> tuple[int, int, int]:
-    """Resolve (season_year, season_quarter, race_week_num) for a series.
+) -> tuple[int, int, int, Optional[str]]:
+    """Resolve (season_year, season_quarter, race_week_num, track_name) for a series.
 
     Uses the active season for `series_id` and the schedule entry whose date range
     contains today. Any of the three values can be overridden via CLI args.
     race_week_num is 0-indexed (matching the API); CLI --week is 1-indexed.
+    track_name is the track raced that week (None if not found).
     """
     seasons = list(_api_call(
         "series_seasons()", client.series_seasons, include_series=True
@@ -347,9 +354,27 @@ def resolve_season_and_week(
             "Could not determine season_year/season_quarter; pass --year and --quarter."
         )
 
-    logger.info("Resolved season: %ds%s, race_week_num %d",
-                season_year, season_quarter, race_week_num)
-    return int(season_year), int(season_quarter), int(race_week_num)
+    track_name = _track_for_week(season, race_week_num)
+    logger.info("Resolved season: %ds%s, race_week_num %d, track %s",
+                season_year, season_quarter, race_week_num, track_name or "?")
+    return int(season_year), int(season_quarter), int(race_week_num), track_name
+
+
+def _track_for_week(season: dict, race_week_num: int) -> Optional[str]:
+    """Track name raced in a given week, formatted '<track_name> - <config_name>'.
+
+    Mirrors iracing_sr_optimizer/fetch_schedule.py:_format_track_name. None if absent.
+    """
+    for sched in season.get("schedules", []) or []:
+        sd = _to_dict(sched)
+        if sd.get("race_week_num") == race_week_num:
+            track = _to_dict(sd.get("track", {}) or {})
+            name = track.get("track_name")
+            if not name:
+                return None
+            config = track.get("config_name") or ""
+            return f"{name} - {config}" if config else name
+    return None
 
 
 def _current_race_week(season: dict) -> int:
@@ -657,13 +682,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         client = get_client()
 
         series_id, series_name = resolve_series(client, args.series, args.series_id)
-        season_year, season_quarter, race_week_num = resolve_season_and_week(
+        season_year, season_quarter, race_week_num, track_name = resolve_season_and_week(
             client, series_id, args.week, args.year, args.quarter
         )
+        track_suffix = f" — {track_name}" if track_name else ""
         print(
             f"Series: {series_name} (id {series_id}) | "
-            f"{season_year}s{season_quarter} week {race_week_num + 1} | "
-            f"class {args.car_class}",
+            f"{season_year}s{season_quarter} week {race_week_num + 1}"
+            f"{track_suffix} | class {args.car_class}",
             file=sys.stderr,
         )
 
@@ -708,7 +734,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1
         total = sum(sum(c.values()) for c in by_class.values())
         print(f"\nMost-used cars by class in {series_name} "
-              f"(week {race_week_num + 1}, {len(results)} subsessions, "
+              f"(week {race_week_num + 1}{track_suffix}, {len(results)} subsessions, "
               f"{total} race entries):\n")
         print(format_all_classes(by_class, args.top))
         logger.info("Done in %.1fs", time.monotonic() - start)
@@ -727,7 +753,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     total = sum(counts.values())
     print(f"\nMost-used cars in {series_name} — class {args.car_class} "
-          f"(week {race_week_num + 1}, {len(results)} subsessions, "
+          f"(week {race_week_num + 1}{track_suffix}, {len(results)} subsessions, "
           f"{total} race entries):\n")
     print(format_ranking(counts, args.top))
     logger.info("Done in %.1fs", time.monotonic() - start)
