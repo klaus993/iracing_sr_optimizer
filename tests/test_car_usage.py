@@ -13,6 +13,7 @@ from car_usage import (  # noqa: E402
     ROW_FIELDS,
     _to_dict,
     _track_for_week,
+    _track_from_results,
     build_rows,
     class_short_names,
     count_cars,
@@ -197,6 +198,27 @@ def test_track_for_week_without_config():
 
 def test_track_for_week_missing_returns_none():
     assert _track_for_week(_SEASON, 9) is None
+
+
+# --- track from results (ground truth for any season) -------------------------
+
+def test_track_from_results_picks_most_common_with_config():
+    results = [
+        {"track": {"track_name": "Spa", "config_name": "Grand Prix"}},
+        {"track": {"track_name": "Spa", "config_name": "Grand Prix"}},
+        {"track": {"track_name": "Monza", "config_name": "GP"}},
+    ]
+    assert _track_from_results(results) == "Spa - Grand Prix"
+
+
+def test_track_from_results_without_config():
+    results = [{"track": {"track_name": "Road Atlanta", "config_name": ""}}]
+    assert _track_from_results(results) == "Road Atlanta"
+
+
+def test_track_from_results_none_when_no_track():
+    assert _track_from_results([{}, {"track": {}}]) is None
+    assert _track_from_results([]) is None
 
 
 # --- export (build_rows / csv / json) -----------------------------------------

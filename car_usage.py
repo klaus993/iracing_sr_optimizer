@@ -363,7 +363,14 @@ def resolve_season_and_week(
             "Could not determine season_year/season_quarter; pass --year and --quarter."
         )
 
-    track_name = _track_for_week(season, race_week_num)
+    # The schedule we have is the *active* season's. Only trust it for the track
+    # when the resolved season actually is that active season; for a past season
+    # (year/quarter overrides) the real track is recovered later from the results.
+    same_season = (
+        int(season_year) == int(season.get("season_year") or -1)
+        and int(season_quarter) == int(season.get("season_quarter") or -1)
+    )
+    track_name = _track_for_week(season, race_week_num) if same_season else None
     logger.info("Resolved season: %ds%s, race_week_num %d, track %s",
                 season_year, season_quarter, race_week_num, track_name or "?")
     return int(season_year), int(season_quarter), int(race_week_num), track_name
@@ -384,6 +391,23 @@ def _track_for_week(season: dict, race_week_num: int) -> Optional[str]:
             config = track.get("config_name") or ""
             return f"{name} - {config}" if config else name
     return None
+
+
+def _track_from_results(results: list) -> Optional[str]:
+    """Most common track across subsession results, '<track_name> - <config_name>'.
+
+    This is ground truth for the queried week regardless of season, since each
+    result carries the track it was raced on. None if no result carries a track.
+    """
+    names: Counter = Counter()
+    for r in results:
+        track = _to_dict(_to_dict(r).get("track", {}) or {})
+        name = track.get("track_name")
+        if not name:
+            continue
+        config = track.get("config_name") or ""
+        names[f"{name} - {config}" if config else name] += 1
+    return names.most_common(1)[0][0] if names else None
 
 
 def _current_race_week(season: dict) -> int:
@@ -795,6 +819,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Unexpected error: {e}\nRe-run with -vv for a full traceback.",
               file=sys.stderr)
         return 1
+
+    # Prefer the track from the actual results: it's correct for any season/week,
+    # including past seasons whose schedule isn't in series_seasons().
+    result_track = _track_from_results(results)
+    if result_track:
+        track_name = result_track
+        track_suffix = f" — {track_name}"
 
     # Build a unified class -> Counter mapping for both modes.
     if args.car_class is None:
