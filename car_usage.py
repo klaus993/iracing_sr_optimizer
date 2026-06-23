@@ -481,6 +481,27 @@ def count_cars(results: list[dict], car_class_short_name: str) -> Counter:
     return counts
 
 
+def count_cars_by_class(results: list[dict]) -> dict[str, Counter]:
+    """Count race entries per car, grouped by car class, across many results.
+
+    Returns {class_short_name -> Counter(car_name -> entries)}. Rows whose class can't
+    be resolved are bucketed under "(unknown)" so no entry is silently dropped.
+    """
+    by_class: dict[str, Counter] = {}
+    for result in results:
+        class_map = _build_class_map(result)
+        for row in _iter_race_rows(result):
+            short = _row_class_short_name(row, class_map) or "(unknown)"
+            car_name = row.get("car_name") or f"car_id:{row.get('car_id')}"
+            by_class.setdefault(short, Counter())[car_name] += 1
+    logger.debug(
+        "Tallied %d classes across %d subsessions: %s",
+        len(by_class), len(results),
+        {c: sum(v.values()) for c, v in by_class.items()},
+    )
+    return by_class
+
+
 def class_short_names(results: list[dict]) -> Counter:
     """Distinct car-class short names seen across results (for --class hints)."""
     seen: Counter = Counter()
@@ -564,6 +585,18 @@ def format_ranking(counts: Counter, top: Optional[int]) -> str:
     return "\n".join(lines)
 
 
+def format_all_classes(by_class: dict[str, Counter], top: Optional[int]) -> str:
+    """Render a per-class ranking, classes ordered by total entries (most first)."""
+    blocks = []
+    ordered = sorted(by_class.items(), key=lambda kv: sum(kv[1].values()), reverse=True)
+    for class_name, counts in ordered:
+        total = sum(counts.values())
+        blocks.append(f"{class_name} — {total} entries")
+        blocks.append(format_ranking(counts, top))
+        blocks.append("")  # blank line between classes
+    return "\n".join(blocks).rstrip()
+
+
 # --- CLI ----------------------------------------------------------------------
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -578,8 +611,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--series-id", type=int, default=None,
                    help="Select a series by exact id (e.g. 447 for IMSA iRacing Series); "
                         "overrides --series")
-    p.add_argument("--class", dest="car_class", default="IMSA23",
-                   help="Car class short name to count (default: IMSA23)")
+    p.add_argument("--class", dest="car_class", default=None,
+                   help="Car class short name to count (e.g. IMSA23). "
+                        "Omit to rank the most-used car in every class.")
     p.add_argument("--week", type=int, default=None,
                    help="Race week, 1-indexed (default: current week)")
     p.add_argument("--year", type=int, default=None,
@@ -665,6 +699,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Unexpected error: {e}\nRe-run with -vv for a full traceback.",
               file=sys.stderr)
         return 1
+
+    # No --class given: rank the most-used car in every class.
+    if args.car_class is None:
+        by_class = count_cars_by_class(results)
+        if not by_class:
+            print("\nNo race entries found.", file=sys.stderr)
+            return 1
+        total = sum(sum(c.values()) for c in by_class.values())
+        print(f"\nMost-used cars by class in {series_name} "
+              f"(week {race_week_num + 1}, {len(results)} subsessions, "
+              f"{total} race entries):\n")
+        print(format_all_classes(by_class, args.top))
+        logger.info("Done in %.1fs", time.monotonic() - start)
+        return 0
 
     counts = count_cars(results, args.car_class)
     if not counts:

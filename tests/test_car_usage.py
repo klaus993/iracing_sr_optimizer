@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from car_usage import (  # noqa: E402
     class_short_names,
     count_cars,
+    count_cars_by_class,
+    format_all_classes,
     resolve_series,
 )
 
@@ -114,6 +116,44 @@ def test_unknown_class_returns_empty_and_hints_list_available():
 def test_missing_car_name_falls_back_to_car_id():
     results = [_result([{"car_id": 173, "car_class_id": GT3}])]
     assert count_cars(results, "IMSA23")["car_id:173"] == 1
+
+
+# --- per-class breakdown ------------------------------------------------------
+
+def test_count_cars_by_class_groups_and_ranks_within_class():
+    results = [_result([
+        {"car_name": "Ferrari 296 GT3", "car_class_id": GT3},
+        {"car_name": "Ferrari 296 GT3", "car_class_id": GT3},
+        {"car_name": "BMW M4 GT3", "car_class_id": GT3},
+        {"car_name": "Porsche 963 GTP", "car_class_id": GTP},
+    ])]
+    by_class = count_cars_by_class(results)
+
+    assert set(by_class) == {"IMSA23", "IMSAP"}
+    assert by_class["IMSA23"].most_common()[0] == ("Ferrari 296 GT3", 2)
+    assert by_class["IMSA23"]["BMW M4 GT3"] == 1
+    assert by_class["IMSAP"]["Porsche 963 GTP"] == 1
+
+
+def test_count_cars_by_class_buckets_unknown_class():
+    results = [{"session_results": [
+        {"simsession_name": "RACE", "results": [
+            {"car_name": "Mystery Car", "car_class_id": 99999},  # not in car_classes
+        ]},
+    ]}]
+    by_class = count_cars_by_class(results)
+    assert by_class["(unknown)"]["Mystery Car"] == 1
+
+
+def test_format_all_classes_orders_largest_class_first():
+    results = [_result([
+        {"car_name": "Ferrari 296 GT3", "car_class_id": GT3},
+        {"car_name": "BMW M4 GT3", "car_class_id": GT3},
+        {"car_name": "Porsche 963 GTP", "car_class_id": GTP},
+    ])]
+    out = format_all_classes(count_cars_by_class(results), top=None)
+    # GT3 has more entries (2) than GTP (1), so its header appears first.
+    assert out.index("IMSA23 — 2 entries") < out.index("IMSAP — 1 entries")
 
 
 # --- series resolution --------------------------------------------------------
