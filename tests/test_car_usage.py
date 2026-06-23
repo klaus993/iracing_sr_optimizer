@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from car_usage import (  # noqa: E402
+    _to_dict,
     _track_for_week,
     class_short_names,
     count_cars,
@@ -155,6 +156,23 @@ def test_format_all_classes_orders_largest_class_first():
     out = format_all_classes(count_cars_by_class(results), top=None)
     # GT3 has more entries (2) than GTP (1), so its header appears first.
     assert out.index("IMSA23 — 2 entries") < out.index("IMSAP — 1 entries")
+
+
+# --- _to_dict JSON safety -----------------------------------------------------
+
+class _FakeModel:
+    """Stub pydantic-style model: mode='json' yields JSON-safe data, default doesn't."""
+    def model_dump(self, mode=None):
+        if mode == "json":
+            return {"at": "2026-06-23T00:00:00Z"}  # serialized
+        return {"at": object()}  # non-serializable, like a datetime
+
+
+def test_to_dict_uses_json_mode_so_result_is_serializable():
+    import json
+    out = _to_dict(_FakeModel())
+    assert out == {"at": "2026-06-23T00:00:00Z"}
+    json.dumps(out)  # must not raise
 
 
 # --- track for week -----------------------------------------------------------

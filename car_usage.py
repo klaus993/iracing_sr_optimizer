@@ -228,11 +228,18 @@ def get_client():
 
 
 def _to_dict(obj) -> dict:
-    """Convert a pydantic model or dict to a plain dict (from iracing_api.py)."""
+    """Convert a pydantic model or dict to a plain, JSON-safe dict.
+
+    Uses model_dump(mode="json") so datetimes etc. become strings (pydantic's
+    default mode keeps them as datetime objects, which breaks json caching).
+    """
     if isinstance(obj, dict):
         return obj
     if hasattr(obj, "model_dump"):
-        return obj.model_dump()
+        try:
+            return obj.model_dump(mode="json")
+        except TypeError:
+            return obj.model_dump()
     if hasattr(obj, "dict"):
         return obj.dict()
     return dict(obj)
@@ -471,9 +478,13 @@ def fetch_result(client, subsession_id: int) -> dict:
         f"result({subsession_id})", client.result, subsession_id=subsession_id
     ))
     try:
+        # Serialize fully before opening the file so a serialization error never
+        # leaves a half-written (corrupt) cache file. default=str is a safety net
+        # for any stray non-JSON type (e.g. datetime).
+        payload = json.dumps(result, default=str)
         with open(cache_file, "w") as f:
-            json.dump(result, f)
-    except OSError as e:
+            f.write(payload)
+    except (OSError, TypeError) as e:
         logger.warning("Could not cache result %s: %s", subsession_id, e)
     return result
 
