@@ -35,6 +35,7 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -249,15 +250,26 @@ def _to_dict(obj) -> dict:
 
 # --- Series / season / week resolution ---------------------------------------
 
+def _normalize_series_name(s: str) -> str:
+    """Lowercase and collapse every run of non-alphanumeric chars to one space.
+
+    Makes name matching tolerant of punctuation/spacing differences between the
+    UI title and the API's series_name, e.g.
+    "Formula C - Dallara F3 Series" -> "formula c dallara f3 series".
+    """
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
 def resolve_series(
     client, series_query: Optional[str], series_id: Optional[int]
 ) -> tuple[int, str]:
     """Resolve a (series_id, series_name) pair from an explicit id or a name query.
 
     If `series_id` is given, it takes precedence (name is looked up for display).
-    Otherwise match by name: a case-insensitive **exact** name match wins over any
-    substring match — this prevents e.g. "IMSA iRacing Series" from being shadowed by
-    "IMSA iRacing Series - Fixed". Raises IRacingAPIError if nothing resolves.
+    Otherwise match by *normalized* name (punctuation/spacing/case-insensitive):
+    a normalized **exact** match wins; else a normalized **substring** match,
+    preferring the shortest series_name (fewest extra words) so a base series
+    beats its "- Fixed" variant. Raises IRacingAPIError if nothing resolves.
     """
     all_series = [_to_dict(s) for s in _api_call("get_series()", client.get_series)]
     logger.debug("Scanning %d series", len(all_series))
@@ -271,7 +283,7 @@ def resolve_series(
                 return series_id, name
         raise IRacingAPIError(f"No series found with series_id {series_id}.")
 
-    q = (series_query or "").lower()
+    q = _normalize_series_name(series_query or "")
     exact = []
     substring = []
     for sd in all_series:
@@ -279,30 +291,56 @@ def resolve_series(
         sid = sd.get("series_id")
         if sid is None:
             continue
-        if name.lower() == q:
+        norm = _normalize_series_name(name)
+        if norm == q:
             exact.append((sid, name))
-        elif q in name.lower():
+        elif q and q in norm:
             substring.append((sid, name))
 
-    if exact:
-        logger.info("Resolved series by exact name -> [%s] %s", exact[0][0], exact[0][1])
-        return exact[0]
-
-    if not substring:
+    matches = exact or substring
+    if not matches:
         raise IRacingAPIError(
-            f"No series matched {series_query!r}. Try a different --series substring "
-            f"or pass --series-id."
+            f"No series matched {series_query!r}. Try a different --series substring, "
+            f"pass --series-id, or run --list-series to see available series."
         )
 
-    if len(substring) > 1:
-        logger.warning("Multiple series matched %r (no exact match):", series_query)
-        for sid, name in substring:
+    # Prefer the shortest name (fewest extra words); stable so ties keep API order.
+    matches.sort(key=lambda m: len(m[1]))
+    if len(matches) > 1:
+        logger.warning("Multiple series matched %r:", series_query)
+        for sid, name in matches:
             logger.warning("  [%s] %s", sid, name)
-        logger.warning("Using the first. Pass --series-id N to pick exactly.")
+        logger.warning("Using [%s] %s. Pass --series-id N to pick exactly.",
+                       matches[0][0], matches[0][1])
 
     logger.info("Resolved series %r -> [%s] %s",
-                series_query, substring[0][0], substring[0][1])
-    return substring[0]
+                series_query, matches[0][0], matches[0][1])
+    return matches[0]
+
+
+
+def list_series(client, query: str) -> None:
+    """Print 'id\\tseries_name' for all series (optionally filtered) to stdout.
+
+    `query` is an empty string for "all", else a name substring matched on the
+    normalized form. Output goes to stdout so it can be piped; sorted by name.
+    """
+    all_series = [_to_dict(s) for s in _api_call("get_series()", client.get_series)]
+    q = _normalize_series_name(query)
+    rows = []
+    for sd in all_series:
+        sid = sd.get("series_id")
+        name = sd.get("series_name", "") or ""
+        if sid is None:
+            continue
+        if q and q not in _normalize_series_name(name):
+            continue
+        rows.append((sid, name))
+    rows.sort(key=lambda r: r[1].lower())
+    for sid, name in rows:
+        print(f"{sid}\t{name}")
+    logger.info("Listed %d series%s", len(rows),
+                f" matching {query!r}" if q else "")
 
 
 def resolve_season_and_week(
@@ -725,6 +763,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--series-id", type=int, default=None,
                    help="Select a series by exact id (e.g. 447 for IMSA iRacing Series); "
                         "overrides --series")
+    p.add_argument("--list-series", nargs="?", const="", default=None, metavar="QUERY",
+                   help="List all series (id + name) and exit; optionally filter by a "
+                        "name substring (e.g. --list-series dallara)")
     p.add_argument("--class", dest="car_class", default=None,
                    help="Car class short name to count (e.g. IMSA23). "
                         "Omit to rank the most-used car in every class.")
@@ -774,6 +815,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     start = time.monotonic()
     try:
         client = get_client()
+
+        if args.list_series is not None:
+            list_series(client, args.list_series)
+            return 0
 
         series_id, series_name = resolve_series(client, args.series, args.series_id)
         season_year, season_quarter, race_week_num, track_name = resolve_season_and_week(

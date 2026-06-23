@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from car_usage import (  # noqa: E402
     ROW_FIELDS,
     _to_dict,
+    _normalize_series_name,
     _track_for_week,
     _track_from_results,
     build_rows,
@@ -309,6 +310,32 @@ def test_series_id_overrides_name():
 def test_substring_fallback_when_no_exact_match():
     sid, _ = resolve_series(_FakeClient(_SERIES), "Vintage", None)
     assert sid == 285
+
+
+def test_normalize_series_name_strips_punctuation_and_case():
+    assert _normalize_series_name("Formula C - Dallara F3 Series") == \
+        "formula c dallara f3 series"
+    assert _normalize_series_name("  IMSA  iRacing   Series!! ") == "imsa iracing series"
+    assert _normalize_series_name("") == ""
+
+
+# Non-Fixed API name uses different punctuation/spacing than the UI title; the
+# normalized query still matches it exactly and must win over the "- Fixed" one.
+_DALLARA = [
+    {"series_id": 456, "series_name": "Formula C - Dallara F3 Series - Fixed"},
+    {"series_id": 123, "series_name": "Formula C  Dallara F3 Series"},
+]
+
+
+def test_normalized_exact_beats_fixed_variant():
+    sid, _ = resolve_series(_FakeClient(_DALLARA), "Formula C - Dallara F3 Series", None)
+    assert sid == 123
+
+
+def test_substring_prefers_shortest_name():
+    # A bare query that substring-matches both: the base (shorter) name wins.
+    sid, _ = resolve_series(_FakeClient(_DALLARA), "Dallara", None)
+    assert sid == 123
 
 
 if __name__ == "__main__":

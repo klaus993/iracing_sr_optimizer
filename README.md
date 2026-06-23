@@ -167,6 +167,10 @@ It uses the same OAuth login and the same four `IRACING_*` environment variables
 # Default: IMSA iRacing Series, current week, most-used car per class
 python car_usage.py
 
+# List series (id + name) to find the one you want; optionally filter by name
+python car_usage.py --list-series
+python car_usage.py --list-series dallara
+
 # Pick a series by exact id (most reliable) or by name
 python car_usage.py --series-id 447
 python car_usage.py --series "iRacing GT3 Regional Tour - Americas"
@@ -185,7 +189,7 @@ python car_usage.py --series-id 447 --json > usage.json
 python car_usage.py --series-id 447 --top 5 -v
 ```
 
-If `--series` matches more than one series, run with `-v` to see the matching ids, then pass `--series-id`. If `--class` matches nothing, the tool lists the class short-names it actually saw that week so you can correct it.
+Series names are matched ignoring punctuation/spacing/case, and a base series (e.g. `… Series`) is preferred over its `… Series - Fixed` variant. If a query still matches more than one series, the tool prints the candidates and uses the shortest match — run `--list-series` (or `-v`) to see the ids and pass `--series-id` for an exact pick. If `--class` matches nothing, the tool lists the class short-names it actually saw that week so you can correct it.
 
 ### Output
 
