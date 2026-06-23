@@ -10,12 +10,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from car_usage import (  # noqa: E402
+    ROW_FIELDS,
     _to_dict,
     _track_for_week,
+    build_rows,
     class_short_names,
     count_cars,
     count_cars_by_class,
     format_all_classes,
+    format_csv,
+    format_json,
     resolve_series,
 )
 
@@ -193,6 +197,62 @@ def test_track_for_week_without_config():
 
 def test_track_for_week_missing_returns_none():
     assert _track_for_week(_SEASON, 9) is None
+
+
+# --- export (build_rows / csv / json) -----------------------------------------
+
+_CONTEXT = {
+    "series_id": 447, "series_name": "IMSA iRacing Series",
+    "season_year": 2026, "season_quarter": 3, "week": 1,
+    "track": "Daytona - Road",
+}
+
+
+def _two_class_by_class():
+    return {
+        "IMSA23": __import__("collections").Counter(
+            {"Ferrari 296 GT3": 3, "BMW M4 GT3": 2}),
+        "IMSAP": __import__("collections").Counter({"Porsche 963 GTP": 1}),
+    }
+
+
+def test_build_rows_shape_ordering_and_share():
+    rows = build_rows(_two_class_by_class(), _CONTEXT, top=None)
+    # Larger class (IMSA23, 5 entries) comes before IMSAP (1).
+    assert [r["car_class"] for r in rows] == ["IMSA23", "IMSA23", "IMSAP"]
+    # Ranks reset per class; share is within-class.
+    first = rows[0]
+    assert first["rank"] == 1 and first["car"] == "Ferrari 296 GT3"
+    assert first["entries"] == 3 and first["share_pct"] == 60.0
+    assert first["series_id"] == 447 and first["track"] == "Daytona - Road"
+    assert first["week"] == 1
+    # Every row carries exactly the declared columns.
+    assert set(first) == set(ROW_FIELDS)
+
+
+def test_build_rows_respects_top():
+    rows = build_rows(_two_class_by_class(), _CONTEXT, top=1)
+    # Top 1 per class -> one row each.
+    assert [r["car"] for r in rows] == ["Ferrari 296 GT3", "Porsche 963 GTP"]
+
+
+def test_format_csv_has_header_and_rows():
+    rows = build_rows(_two_class_by_class(), _CONTEXT, top=None)
+    out = format_csv(rows)
+    lines = out.splitlines()
+    assert lines[0] == ",".join(ROW_FIELDS)
+    assert len(lines) == 1 + len(rows)
+    assert "Ferrari 296 GT3" in out
+
+
+def test_format_json_round_trips():
+    import json
+    rows = build_rows(_two_class_by_class(), _CONTEXT, top=None)
+    assert json.loads(format_json(rows)) == rows
+
+
+def test_format_csv_empty_is_header_only():
+    assert format_csv([]).splitlines() == [",".join(ROW_FIELDS)]
 
 
 # --- series resolution --------------------------------------------------------

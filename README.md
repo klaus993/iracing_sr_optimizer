@@ -154,3 +154,52 @@ tests/
   test_sr_calculator.py # SR calculation for lap/time/heat races
   test_fetch_schedule.py # Category mapping, frequency calc, parsing
 ```
+
+## Most-used car tool (`car_usage.py`)
+
+A separate, self-contained script that answers a different question: **which car is most used in a series this week?** It aggregates the week's official race results and counts **race entries** per car — one tally per driver who started a race, summed across every split/session. Qualifying and practice are excluded.
+
+It uses the same OAuth login and the same four `IRACING_*` environment variables as the main tool (see [Configuration](#configuration)).
+
+### Usage
+
+```bash
+# Default: IMSA iRacing Series, current week, most-used car per class
+python car_usage.py
+
+# Pick a series by exact id (most reliable) or by name
+python car_usage.py --series-id 447
+python car_usage.py --series "iRacing GT3 Regional Tour - Americas"
+
+# Restrict to one car class (omit to break down every class)
+python car_usage.py --series-id 447 --class IMSA23
+
+# A specific week instead of the current one
+python car_usage.py --series-id 447 --week 8
+
+# Machine-readable output (logs/progress stay on stderr, so stdout stays clean)
+python car_usage.py --series-id 447 --csv  > usage.csv
+python car_usage.py --series-id 447 --json > usage.json
+
+# Top N cars per class; verbose logging (-v info, -vv debug)
+python car_usage.py --series-id 447 --top 5 -v
+```
+
+If `--series` matches more than one series, run with `-v` to see the matching ids, then pass `--series-id`. If `--class` matches nothing, the tool lists the class short-names it actually saw that week so you can correct it.
+
+### Output
+
+The default is a human-readable table per class (cars ranked by entries, with within-class share), headed by the series, week, and the track raced that week. `--csv` / `--json` emit one row per car with these columns:
+
+| Column | Meaning |
+|--------|---------|
+| `series_id`, `series_name` | The resolved series |
+| `season_year`, `season_quarter`, `week` | Season and 1-indexed race week |
+| `track` | Track raced that week |
+| `car_class` | Car class short name (e.g. `IMSA23`) |
+| `rank`, `car`, `entries` | Rank within the class, car name, race-entry count |
+| `share_pct` | Entries as a percentage of that class |
+
+### Caching & performance
+
+Subsession results are immutable once final, so each is cached under `~/.iracing_sr_cache/results/`. The **first** run of a busy week can be hundreds of API calls (a few minutes, throttled and rate-limit-aware); **re-runs are near-instant** from cache. Use `--max-sessions N` to sample a subset for a quick check.

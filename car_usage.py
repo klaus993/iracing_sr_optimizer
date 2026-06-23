@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 import datetime as dt
 import hashlib
+import io
 import json
 import logging
 import os
@@ -633,6 +635,58 @@ def format_all_classes(by_class: dict[str, Counter], top: Optional[int]) -> str:
     return "\n".join(blocks).rstrip()
 
 
+# --- Machine-readable export (pure) -------------------------------------------
+
+ROW_FIELDS = [
+    "series_id", "series_name", "season_year", "season_quarter", "week",
+    "track", "car_class", "rank", "car", "entries", "share_pct",
+]
+
+
+def build_rows(
+    by_class: dict[str, Counter], context: dict, top: Optional[int]
+) -> list[dict]:
+    """Flatten per-class car counts into one row per car (for CSV/JSON export).
+
+    Classes are ordered by total entries (most first); within a class, cars are
+    ranked by entries. `share_pct` is the within-class share (1 decimal). `context`
+    supplies series/season/track fields shared by every row.
+    """
+    rows = []
+    ordered = sorted(by_class.items(), key=lambda kv: sum(kv[1].values()), reverse=True)
+    for class_name, counts in ordered:
+        total = sum(counts.values())
+        for rank, (car, n) in enumerate(counts.most_common(top), 1):
+            rows.append({
+                "series_id": context.get("series_id"),
+                "series_name": context.get("series_name"),
+                "season_year": context.get("season_year"),
+                "season_quarter": context.get("season_quarter"),
+                "week": context.get("week"),
+                "track": context.get("track"),
+                "car_class": class_name,
+                "rank": rank,
+                "car": car,
+                "entries": n,
+                "share_pct": round(n / total * 100, 1) if total else 0.0,
+            })
+    return rows
+
+
+def format_csv(rows: list[dict]) -> str:
+    """Render export rows as CSV (always includes the header)."""
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=ROW_FIELDS)
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue().rstrip("\r\n")
+
+
+def format_json(rows: list[dict]) -> str:
+    """Render export rows as a JSON array."""
+    return json.dumps(rows, indent=2)
+
+
 # --- CLI ----------------------------------------------------------------------
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -662,6 +716,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                    help="Cap the number of subsessions fetched (for a quick sample)")
     p.add_argument("--top", type=int, default=None,
                    help="Show only the top N cars (default: all)")
+    fmt = p.add_mutually_exclusive_group()
+    fmt.add_argument("--csv", dest="output_csv", action="store_true",
+                     help="Output CSV to stdout (logs/progress stay on stderr)")
+    fmt.add_argument("--json", dest="output_json", action="store_true",
+                     help="Output JSON to stdout (logs/progress stay on stderr)")
     p.add_argument("--verbose", "-v", action="count", default=0,
                    help="Verbose logging: -v for INFO, -vv for DEBUG")
     return p.parse_args(argv)
@@ -737,36 +796,59 @@ def main(argv: Optional[list[str]] = None) -> int:
               file=sys.stderr)
         return 1
 
-    # No --class given: rank the most-used car in every class.
+    # Build a unified class -> Counter mapping for both modes.
     if args.car_class is None:
         by_class = count_cars_by_class(results)
-        if not by_class:
+    else:
+        counts = count_cars(results, args.car_class)
+        by_class = {args.car_class: counts} if counts else {}
+
+    if not by_class:
+        if args.car_class is None:
             print("\nNo race entries found.", file=sys.stderr)
-            return 1
-        total = sum(sum(c.values()) for c in by_class.values())
+        else:
+            print(f"\nNo entries found for class {args.car_class!r}.", file=sys.stderr)
+            hints = class_short_names(results)
+            if hints:
+                print("Class short-names seen this week (use one with --class):",
+                      file=sys.stderr)
+                for name, n in hints.most_common():
+                    print(f"  {name}  ({n} entries)", file=sys.stderr)
+        # Still emit an empty structure so piped consumers get valid output.
+        if args.output_json:
+            print(format_json([]))
+        elif args.output_csv:
+            print(format_csv([]))
+        return 1
+
+    context = {
+        "series_id": series_id,
+        "series_name": series_name,
+        "season_year": season_year,
+        "season_quarter": season_quarter,
+        "week": race_week_num + 1,
+        "track": track_name,
+    }
+
+    # Machine-readable export (stdout stays clean — logs/status are on stderr).
+    if args.output_json or args.output_csv:
+        rows = build_rows(by_class, context, args.top)
+        print(format_json(rows) if args.output_json else format_csv(rows))
+        logger.info("Done in %.1fs", time.monotonic() - start)
+        return 0
+
+    # Human-readable tables.
+    total = sum(sum(c.values()) for c in by_class.values())
+    if args.car_class is None:
         print(f"\nMost-used cars by class in {series_name} "
               f"(week {race_week_num + 1}{track_suffix}, {len(results)} subsessions, "
               f"{total} race entries):\n")
         print(format_all_classes(by_class, args.top))
-        logger.info("Done in %.1fs", time.monotonic() - start)
-        return 0
-
-    counts = count_cars(results, args.car_class)
-    if not counts:
-        print(f"\nNo entries found for class {args.car_class!r}.", file=sys.stderr)
-        hints = class_short_names(results)
-        if hints:
-            print("Class short-names seen this week (use one with --class):",
-                  file=sys.stderr)
-            for name, n in hints.most_common():
-                print(f"  {name}  ({n} entries)", file=sys.stderr)
-        return 1
-
-    total = sum(counts.values())
-    print(f"\nMost-used cars in {series_name} — class {args.car_class} "
-          f"(week {race_week_num + 1}{track_suffix}, {len(results)} subsessions, "
-          f"{total} race entries):\n")
-    print(format_ranking(counts, args.top))
+    else:
+        print(f"\nMost-used cars in {series_name} — class {args.car_class} "
+              f"(week {race_week_num + 1}{track_suffix}, {len(results)} subsessions, "
+              f"{total} race entries):\n")
+        print(format_ranking(by_class[args.car_class], args.top))
     logger.info("Done in %.1fs", time.monotonic() - start)
     return 0
 
