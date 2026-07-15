@@ -207,3 +207,45 @@ The default is a human-readable table per class (cars ranked by entries, with wi
 ### Caching & performance
 
 Subsession results are immutable once final, so each is cached under `~/.iracing_sr_cache/results/`. The **first** run of a busy week can be hundreds of API calls (a few minutes, throttled and rate-limit-aware); **re-runs are near-instant** from cache. Use `--max-sessions N` to sample a subset for a quick check.
+
+## Meta car tool (`car_meta.py`)
+
+Where `car_usage.py` answers "which car is most *used*", this answers "which car is actually *good*". For each car in a class it combines **usage share** with **win rate**, **average finish**, and **raw pace** — the fastest qualifying lap (clean, low-fuel), a robust 5th‑percentile qual lap, and the gap to the fastest car. Crucially, it can slice those metrics by the split you'd actually race in, so the picture reflects your competition rather than the aliens.
+
+It reuses `car_usage.py` for auth, caching, and series/season resolution, so it needs the same four `IRACING_*` environment variables and shares the same results cache.
+
+### Scopes
+
+Pass one or more of these to `--scope` (default `all`):
+
+| Scope | What it analyzes |
+|-------|------------------|
+| `all` | Every split of the week (the whole field) |
+| `top` | Only split 1 — the highest‑SoF split per race slot (the aliens). `--slots N` keeps the top N per slot |
+| `mine` | Only the split your `--irating` would be placed in, each slot (needs `--irating`) |
+| `tiers` | Breaks the meta down across **every** iRating tier (split 1, split 2, …), so you can see how the pick shifts by skill level |
+
+Passing `mine` without `--irating` falls back to `tiers` (i.e. "show me all iRatings").
+
+### Usage
+
+```bash
+# Meta for the open IMSA GT3 class this week, whole field
+python car_meta.py --series-id 447 --class IMSA23
+
+# The aliens' pick vs. yours, side by side (447=IMSA open, 539=IMSA fixed)
+python car_meta.py --series-id 447 --class IMSA23 --week 5 --scope top mine --irating 2652
+
+# How the meta shifts across every iRating tier
+python car_meta.py --series-id 447 --class IMSA23 --week 5 --scope tiers
+
+# Everything at once, machine-readable (one row per car per scope/tier)
+python car_meta.py --series-id 447 --class IMSA23 --week 5 \
+    --scope all top mine --irating 2652 --csv > meta.csv
+```
+
+### Output
+
+Human‑readable tables per scope (and per class), each car showing entries, usage %, wins, win %, podium %, average finish, and best / p5 qualifying lap with the gap to the fastest car. The `mine` and `tiers` headings report the split's SoF and iRating band so you can see exactly which field the numbers describe. `--csv` / `--json` emit one row per car with a `scope` column (`all`, `top`, `mine`, or `tier1`, `tier2`, …); lap times are in seconds.
+
+The same caching applies — the first run of a live, uncached week fetches and throttles; re-runs are instant.
