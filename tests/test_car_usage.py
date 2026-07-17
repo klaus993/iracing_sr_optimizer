@@ -4,6 +4,7 @@ These don't touch the network or OAuth — they exercise the tally + series-reso
 helpers against fixture dicts shaped like the iRacing Data API responses.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from car_usage import (  # noqa: E402
     ROW_FIELDS,
+    _clean_credential,
+    _strip_edges,
     _to_dict,
     _normalize_series_name,
     _track_for_week,
@@ -336,6 +339,74 @@ def test_substring_prefers_shortest_name():
     # A bare query that substring-matches both: the base (shorter) name wins.
     sid, _ = resolve_series(_FakeClient(_DALLARA), "Dallara", None)
     assert sid == 123
+
+
+# --- Credential normalization (the OAuth 400 fix) ----------------------------
+# car_usage.py is self-contained and reads the IRACING_* env vars itself, so it
+# carries its own copy of the cleanup that strips quote-wrapping and invisible
+# edge chars before the value reaches iRacing's token endpoint. These use a fake,
+# test-controlled env var (restored afterward) — never the real credentials.
+
+
+def _with_env(value, fn):
+    """Run fn() with FAKE_CRED set to value (or unset if None); restore after."""
+    prev = os.environ.get("FAKE_CRED")
+    if value is None:
+        os.environ.pop("FAKE_CRED", None)
+    else:
+        os.environ["FAKE_CRED"] = value
+    try:
+        return fn()
+    finally:
+        if prev is None:
+            os.environ.pop("FAKE_CRED", None)
+        else:
+            os.environ["FAKE_CRED"] = prev
+
+
+def test_strip_edges_plain_and_whitespace():
+    assert _strip_edges("user@example.com") == "user@example.com"
+    assert _strip_edges("  user@example.com \t\n") == "user@example.com"
+
+
+def test_strip_edges_invisible_chars():
+    # BOM, zero-width space, NBSP at the edges — str.strip() misses these.
+    assert _strip_edges("﻿user@example.com") == "user@example.com"
+    assert _strip_edges("​ user@example.com ") == "user@example.com"
+
+
+def test_strip_edges_keeps_interior():
+    assert _strip_edges("  two words  ") == "two words"
+
+
+def test_clean_credential_missing_is_empty():
+    assert _with_env(None, lambda: _clean_credential("FAKE_CRED")) == ""
+
+
+def test_clean_credential_plain():
+    assert _with_env("secret-value", lambda: _clean_credential("FAKE_CRED")) == "secret-value"
+
+
+def test_clean_credential_strips_double_quotes():
+    assert _with_env('"secret-value"', lambda: _clean_credential("FAKE_CRED")) == "secret-value"
+
+
+def test_clean_credential_strips_single_quotes():
+    assert _with_env("'secret-value'", lambda: _clean_credential("FAKE_CRED")) == "secret-value"
+
+
+def test_clean_credential_strips_bom_then_quotes():
+    # The real-world failure mode: BOM outside a quote-wrapped value.
+    assert _with_env('﻿"secret-value"', lambda: _clean_credential("FAKE_CRED")) == "secret-value"
+
+
+def test_clean_credential_preserves_unbalanced_quote():
+    # A leading-only quote is not a wrapping pair — keep it.
+    assert _with_env('"secret-value', lambda: _clean_credential("FAKE_CRED")) == '"secret-value'
+
+
+def test_clean_credential_strips_only_one_layer():
+    assert _with_env('""secret-value""', lambda: _clean_credential("FAKE_CRED")) == '"secret-value"'
 
 
 if __name__ == "__main__":

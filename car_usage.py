@@ -38,6 +38,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
@@ -112,6 +113,39 @@ def _api_call(label: str, fn, *args, **kwargs):
 
 # --- OAuth (copied from iracing_sr_optimizer/iracing_api.py, self-contained) --
 
+# Invisible characters that frequently sneak into credentials via copy-paste or
+# files saved with a BOM. They survive a print() unchanged (so the value "looks"
+# correct when echoed) but make iRacing's OAuth endpoint reject the request with
+# invalid_request "invalid character at index 0". Note str.strip() does NOT
+# remove the BOM, so we strip these explicitly. Defined by codepoint to keep the
+# source pure-ASCII and reviewable:
+#   FEFF BOM/zero-width no-break  200B zero-width space  200C/200D zero-width
+#   (non-)joiner  00A0 non-breaking space
+_INVISIBLE_EDGE_CHARS = "".join(
+    chr(c) for c in (0xFEFF, 0x200B, 0x200C, 0x200D, 0x00A0)
+) + " \t\r\n"
+
+
+def _strip_edges(value: str) -> str:
+    return value.strip().strip(_INVISIBLE_EDGE_CHARS).strip()
+
+
+def _clean_credential(name: str) -> str:
+    """Read an env var and normalize it for use in the OAuth request.
+
+    Removes surrounding whitespace + invisible edge chars, then strips one layer
+    of matching surrounding quotes. Quote-wrapping is a common mistake — the
+    shell or a .env loader captures the quotes into the value (e.g. the value is
+    literally "your@email.com", quotes included). The quotes survive a print()
+    so the value looks right when echoed, but iRacing's OAuth endpoint rejects
+    the request with invalid_request "invalid character at index 0".
+    """
+    value = _strip_edges(os.environ.get(name, ""))
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
+        value = _strip_edges(value[1:-1])
+    return value
+
+
 def _mask_secret(secret: str, identifier: str) -> str:
     """Mask a secret using iRacing's masking algorithm.
 
@@ -131,10 +165,10 @@ def _get_oauth_token() -> str:
 
     Raises IRacingAPIError if credentials are missing or auth fails.
     """
-    email = os.environ.get("IRACING_EMAIL", "")
-    password = os.environ.get("IRACING_PASSWORD", "")
-    client_id = os.environ.get("IRACING_CLIENT_ID", "")
-    client_secret = os.environ.get("IRACING_CLIENT_SECRET", "")
+    email = _clean_credential("IRACING_EMAIL")
+    password = _clean_credential("IRACING_PASSWORD")
+    client_id = _clean_credential("IRACING_CLIENT_ID")
+    client_secret = _clean_credential("IRACING_CLIENT_SECRET")
 
     # Log which credentials are present without leaking any values.
     logger.debug(
@@ -189,6 +223,15 @@ def _get_oauth_token() -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             token_data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # The OAuth server returns a JSON body (e.g. {"error":"invalid_client",
+        # "error_description":"..."}) explaining the failure. Surface it — without
+        # it, every auth problem looks like an identical "400 Bad Request".
+        body = e.read().decode("utf-8", "replace").strip()
+        raise IRacingAPIError(
+            f"OAuth token request failed: HTTP {e.code} {e.reason}"
+            + (f" — {body}" if body else "")
+        )
     except Exception as e:
         raise IRacingAPIError(f"OAuth token request failed: {e}")
 

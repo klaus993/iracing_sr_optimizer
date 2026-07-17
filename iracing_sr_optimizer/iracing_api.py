@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Optional
@@ -96,6 +97,15 @@ def _get_oauth_token() -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             token_data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # The OAuth server returns a JSON body (e.g. {"error":"invalid_client",
+        # "error_description":"..."}) explaining the failure. Surface it — without
+        # it, every auth problem looks like an identical "400 Bad Request".
+        body = e.read().decode("utf-8", "replace").strip()
+        raise IRacingAPIError(
+            f"OAuth token request failed: HTTP {e.code} {e.reason}"
+            + (f" — {body}" if body else "")
+        )
     except Exception as e:
         raise IRacingAPIError(f"OAuth token request failed: {e}")
 
