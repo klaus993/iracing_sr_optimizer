@@ -65,13 +65,30 @@ logger = logging.getLogger("race_report")
 # car payload carries weight/hp/BoP only), so these come from the iRacing Fandom wiki
 # spec boxes, read via its MediaWiki api.php endpoint. The series' max_pct_fuel_fill
 # (from the API) is applied on top of these to get usable fuel.
+#
+# Regenerate with `python fetch_fuel_capacities.py`. Cars absent from this table simply
+# get no fuel bound — never guess an entry, because a wrong car_id silently attaches a
+# capacity to the wrong car and the bound still looks plausible.
 FUEL_CAPACITY_L: dict[int, float] = {
+    # LMP2
+    128: 96.90,    # Dallara P217
+    # GT3
     132: 100.00,   # BMW M4 GT3 EVO
+    133: 120.00,   # Lamborghini Huracan GT3 EVO
     156: 105.99,   # Mercedes-AMG GT3 2020
+    169: 99.94,    # Porsche 911 GT3 R (992)
     173: 104.10,   # Ferrari 296 GT3
+    184: 104.10,   # Chevrolet Corvette Z06 GT3.R
     185: 110.15,   # Ford Mustang GT3
     188: 110.15,   # McLaren 720S GT3 EVO
+    194: 112.05,   # Acura NSX GT3 EVO 22
     206: 106.00,   # Aston Martin Vantage GT3 EVO
+    # GTP / LMDh — spec chassis, so they share a tank
+    159: 88.96,    # BMW M Hybrid V8 (Evo)
+    168: 88.96,    # Cadillac V-Series.R GTP
+    170: 88.96,    # Acura ARX-06 GTP
+    174: 88.96,    # Porsche 963 GTP
+    196: 88.96,    # Ferrari 499P
 }
 
 # A lap is "wet-phase" once the class median is this much slower than the dry baseline.

@@ -308,3 +308,23 @@ the race, collapsed stops ≤ flagged pit laps, wet-phase share agrees with the 
 One subtlety worth knowing: iRacing flags **both the in-lap and the out-lap** of a pit
 stop, so consecutive flagged laps are one stop — raw flag counts of 1–6 per driver
 collapse to 1–3 real stops.
+
+### Regenerating the fuel table
+
+Tank capacities are the one input `race_report.py` cannot get from the API, so they live
+in `FUEL_CAPACITY_L`. `fetch_fuel_capacities.py` regenerates that table from the iRacing
+wiki (via its MediaWiki API — the rendered pages block automated clients) and prints a
+paste-ready dict keyed by `car_id`:
+
+```bash
+# Refresh the cars already in the table
+python fetch_fuel_capacities.py
+
+# Add specific cars, or sweep a whole class
+python fetch_fuel_capacities.py --cars "Porsche 911 GT3 R (992)" "Ferrari 499P"
+python fetch_fuel_capacities.py --car-type gt3
+```
+
+Cars absent from the table simply get no fuel bound. Never hand-add an entry without a
+confirmed `car_id` — a wrong id silently attaches a capacity to the wrong car and the
+resulting bound still looks plausible.

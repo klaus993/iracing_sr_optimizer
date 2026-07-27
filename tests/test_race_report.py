@@ -309,6 +309,21 @@ def test_capacity_table_covers_the_gt3_field():
         assert FUEL_CAPACITY_L[car_id] > 90
 
 
+def test_capacity_table_covers_the_whole_imsa_field():
+    """Every car_id in the IMSA week-5 car_restrictions payload, so all three classes
+    get a fuel bound rather than just GT3."""
+    imsa_field = (128, 132, 133, 156, 159, 168, 169, 170, 173, 174, 184, 185, 188,
+                  194, 196, 206)
+    missing = [c for c in imsa_field if c not in FUEL_CAPACITY_L]
+    assert not missing, f"no capacity for car_ids {missing}"
+
+
+def test_lmdh_cars_share_one_tank():
+    """GTP/LMDh is a spec chassis — a divergence here means a bad wiki scrape."""
+    lmdh = [FUEL_CAPACITY_L[c] for c in (159, 168, 170, 174, 196)]
+    assert len(set(lmdh)) == 1, f"LMDh capacities disagree: {lmdh}"
+
+
 # --- Weather forecast mapping -------------------------------------------------
 
 def _forecast_row(offset, precip_chance=0, air_temp=2200, affects=True):
