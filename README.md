@@ -249,3 +249,62 @@ python car_meta.py --series-id 447 --class IMSA23 --week 5 \
 Human‑readable tables per scope (and per class), each car showing entries, usage %, wins, win %, podium %, average finish, and best / p5 qualifying lap with the gap to the fastest car. The `mine` and `tiers` headings report the split's SoF and iRating band so you can see exactly which field the numbers describe. `--csv` / `--json` emit one row per car with a `scope` column (`all`, `top`, `mine`, or `tier1`, `tier2`, …); lap times are in seconds.
 
 The same caching applies — the first run of a live, uncached week fetches and throttles; re-runs are instant.
+
+## Race strategy report (`race_report.py`)
+
+Where `car_meta.py` looks at a whole week, this dissects **one race**: what every car in a
+class actually did. Stint structure, pit stops and what they cost, inferred tyre calls,
+fuel bounds, the weather timeline, penalties, and how positions moved through it all.
+
+Built for wet and mixed races, where the result is usually decided by *when* people
+stopped rather than raw pace. On a dry race the weather and tyre sections report "no
+transition detected" and the stint / pit / fuel analysis still stands.
+
+It reuses `car_usage.py` for auth, retry and caching, and `car_meta.py` for lap-time
+formatting, so it needs the same four `IRACING_*` environment variables.
+
+### Usage
+
+```bash
+# Full report for one class, highlighting a driver with *
+python race_report.py --subsession 87466883 --class IMSA23 --cust-id 837530
+
+# Every class in the session
+python race_report.py --subsession 87466883
+
+# Machine-readable (logs stay on stderr)
+python race_report.py --subsession 87466883 --class IMSA23 --csv  > race.csv
+python race_report.py --subsession 87466883 --json > race.json
+
+# Skip the signed weather-forecast fetch; verbose logging
+python race_report.py --subsession 87466883 --no-forecast -v
+```
+
+### What it can and cannot know
+
+The iRacing Data API does not expose fuel tank capacity, tyre compound, or litres added
+per stop, so the tool is explicit about which numbers are measured and which are not:
+
+| Quantity | Source |
+|----------|--------|
+| Stints, pit stops, lap times, positions | Measured — lap chart + `pitted` lap events |
+| Max fuel fill %, BoP, weather forecast | Measured — season schedule `car_restrictions` and `weather_url` |
+| Fuel consumption | **Upper bound** — `capacity × max fill ÷ opening-stint laps`. A car cannot start above the cap, so underfilling only lowers the true figure |
+| Tyre compound | **Inferred** from post-stop pace vs the class median, reported with a confidence, and called "unclear" when the evidence is thin |
+| Litres per stop | **Not derivable** — pit time bundles transit, service, penalties, repairs and any off-track on the in/out lap |
+
+Tank capacities are hardcoded in `FUEL_CAPACITY_L` (from the iRacing wiki); the fill
+percentage that multiplies them comes from the API, per car, per week.
+
+### Output
+
+Terminal tables: the class strategy table (grid, stops, stint laps, pit loss, dry/wet
+median pace, best lap, incidents, iRating delta), a weather timeline, per-stop tyre
+inferences, fuel bounds per car model, the week's BoP, penalties from the event log, and
+a **reconciliation block** that re-checks the analysis against the raw data (stints tile
+the race, collapsed stops ≤ flagged pit laps, wet-phase share agrees with the session's
+`precip_time_pct`). Read that block before trusting the numbers.
+
+One subtlety worth knowing: iRacing flags **both the in-lap and the out-lap** of a pit
+stop, so consecutive flagged laps are one stop — raw flag counts of 1–6 per driver
+collapse to 1–3 real stops.
