@@ -212,3 +212,11 @@ memory/
 claude_iracing_*.md
 season_schedule.txt
 sporting_code.txt
+
+# Local output artifacts from the standalone tools (--csv / --json redirects)
+usage.csv
+usage.json
+meta.csv
+meta.json
+race.csv
+race.json
